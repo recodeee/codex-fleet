@@ -71,6 +71,10 @@ if [[ -n "$CODEX_FLEET_TMUX_SOCKET" ]]; then
 fi
 WAKE="${WAKE:-/tmp/codex-fleet-wake-prompt.md}"
 N_PANES=8
+N_PANES_EXPLICIT=0
+# Hard ceiling for auto-grown N_PANES so a 100-account user doesn't
+# accidentally spawn 100 panes. Override via env if you really do want more.
+N_PANES_AUTO_MAX="${CODEX_FLEET_N_PANES_AUTO_MAX:-24}"
 ATTACH=1
 PLAN_SLUG=""
 FLEET_ID="${FLEET_ID:-}"
@@ -80,7 +84,7 @@ NO_CAP_CACHE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --plan-slug) PLAN_SLUG="$2"; shift 2 ;;
-    --n) N_PANES="$2"; shift 2 ;;
+    --n) N_PANES="$2"; N_PANES_EXPLICIT=1; shift 2 ;;
     --no-attach) ATTACH=0; shift ;;
     --fleet-id) FLEET_ID="$2"; shift 2 ;;
     --auto-fleet-id) AUTO_FLEET_ID=1; shift ;;
@@ -101,6 +105,12 @@ preflight_log() { log "preflight: $*"; }
 preflight_warn() { warn "preflight: $*"; }
 # shellcheck source=lib/mcp-preflight.sh
 . "$SCRIPT_DIR/lib/mcp-preflight.sh"
+
+# Ensure the Colony worker daemon (embeddings + viewer + MCP context store)
+# is running so every fleet worker can read/write task context from boot.
+# Idempotent + non-fatal: if Colony is unhealthy the fleet still spawns and
+# falls back to shell-CLI calls, matching the worker-prompt's fallback path.
+fleet_ensure_colony_running
 
 FLEET_CONFIG_TMPL="${CODEX_FLEET_CONFIG_TMPL:-$SCRIPT_DIR/fleet-config.toml.tmpl}"
 
@@ -414,13 +424,27 @@ fi
 #    (a) Score by agent-auth's 5h% * weekly% (fast, but unreliable for codex
 #        CLI's own rolling cap).
 #    (b) Probe each candidate with `codex exec` to detect the *real* cap
-#        state. Take top 3N candidates so we can skip up to 2N capped
-#        accounts and still end up with N healthy ones.
-TOP=$((N_PANES * 3))
-log "picking $TOP candidate accounts (will probe + filter down to $N_PANES healthy)"
-CANDIDATES=$(agent-auth list 2>/dev/null | N="$TOP" python3 -c '
+#        state. We probe EVERY account that has any meaningful budget left —
+#        cap-probe.sh has its own per-email cache so re-probing 30+ accounts
+#        on a warm cache is cheap. Skipping the *3 cap is what lets the
+#        bringup actually use all 30+ accounts when most are partially used.
+#    Override via CODEX_FLEET_TOP_CANDIDATES (default 0 = no cap, probe all
+#    that pass the minimum-budget filter). Floors are deliberately permissive
+#    (5/5) — anything with a non-trivial budget gets probed; the live
+#    `codex exec` ping is the source of truth for "actually usable".
+TOP="${CODEX_FLEET_TOP_CANDIDATES:-0}"
+MIN_5H="${CODEX_FLEET_MIN_5H_PCT:-5}"
+MIN_WEEKLY="${CODEX_FLEET_MIN_WEEKLY_PCT:-5}"
+if [ "$TOP" = "0" ]; then
+  log "picking ALL candidate accounts with 5h>=${MIN_5H}%, weekly>=${MIN_WEEKLY}% (will probe + spawn min(healthy, $N_PANES) workers)"
+else
+  log "picking top $TOP candidate accounts with 5h>=${MIN_5H}%, weekly>=${MIN_WEEKLY}% (override via CODEX_FLEET_TOP_CANDIDATES)"
+fi
+CANDIDATES=$(agent-auth list 2>/dev/null | N="$TOP" MIN_H="$MIN_5H" MIN_W="$MIN_WEEKLY" python3 -c '
 import os, sys, re
-n = int(os.environ["N"])
+n = int(os.environ["N"])           # 0 means "no cap, return all"
+mh = int(os.environ["MIN_H"])
+mw = int(os.environ["MIN_W"])
 rows = []
 for line in sys.stdin:
     em = re.search(r"([\w.+-]+@[\w.-]+\.[a-z]+)", line)
@@ -429,13 +453,14 @@ for line in sys.stdin:
     h5m = re.search(r"5h=(\d+)%", line); wkm = re.search(r"weekly=(\d+)%", line)
     if not h5m or not wkm: continue
     h, w = int(h5m.group(1)), int(wkm.group(1))
-    if h < 40 or w < 25: continue
+    if h < mh or w < mw: continue
     rows.append((h*w, email))
 rows.sort(reverse=True)
-for _, email in rows[:n]:
+out = rows if n == 0 else rows[:n]
+for _, email in out:
     print(email)
 ')
-[ -n "$CANDIDATES" ] || die "no candidate accounts found (need 5h>=40%, wk>=25% in agent-auth list)"
+[ -n "$CANDIDATES" ] || die "no candidate accounts found (need 5h>=${MIN_5H}%, wk>=${MIN_WEEKLY}% in agent-auth list — relax via CODEX_FLEET_MIN_5H_PCT / CODEX_FLEET_MIN_WEEKLY_PCT)"
 CAND_N=$(printf "%s\n" "$CANDIDATES" | wc -l)
 log "ranked $CAND_N candidates by agent-auth score; running live probe..."
 
@@ -473,6 +498,25 @@ if [ "$cap_cache_hit" = "0" ]; then
   HEALTHY_EMAILS=$(bash "$SCRIPT_DIR/cap-probe.sh" "$N_PANES" $CANDIDATES 2>/tmp/cap-probe.err) || true
 fi
 HEALTHY_N=$(printf "%s\n" "$HEALTHY_EMAILS" | grep -c "@" || true)
+
+# Auto-grow N_PANES to match what the probe actually found, capped by
+# CODEX_FLEET_N_PANES_AUTO_MAX (default 24). Triggered only when the
+# operator did NOT pass --n explicitly — explicit --n always wins. Without
+# this, the bringup historically clamped at the default --n=8 and left
+# extra healthy accounts idle in cache instead of spawning them.
+if [ "$N_PANES_EXPLICIT" = "0" ] && [ "$HEALTHY_N" -gt "$N_PANES" ]; then
+  prev_n="$N_PANES"
+  N_PANES="$HEALTHY_N"
+  if [ "$N_PANES" -gt "$N_PANES_AUTO_MAX" ]; then
+    N_PANES="$N_PANES_AUTO_MAX"
+  fi
+  log "auto-grow N_PANES: $prev_n → $N_PANES (HEALTHY_N=$HEALTHY_N, cap=$N_PANES_AUTO_MAX). Override with --n or CODEX_FLEET_N_PANES_AUTO_MAX."
+  # Truncate HEALTHY_EMAILS to N_PANES so downstream stage/spawn loops
+  # don't try to spin more workers than the layout produces.
+  HEALTHY_EMAILS=$(printf "%s\n" "$HEALTHY_EMAILS" | head -n "$N_PANES")
+  HEALTHY_N=$(printf "%s\n" "$HEALTHY_EMAILS" | grep -c "@" || true)
+fi
+
 if [ "$HEALTHY_N" -lt "$N_PANES" ]; then
   warn "cap-probe found only $HEALTHY_N/$N_PANES healthy accounts"
   warn "$(cat /tmp/cap-probe.err 2>/dev/null)"
@@ -612,20 +656,27 @@ tmux set-option -w -t "$SESSION:overview" remain-on-exit on
 # silently hiding the tab strip.
 
 # 8.5 + 9. Apply the typed overview layout. fleet-layout owns the pane
-# topology now; full-bringup only decides operator policy (header rows,
-# binary lookup, and worker spawn metadata).
+# topology now; full-bringup only decides operator policy (header rows
+# and worker spawn metadata).
+#
+# The legacy `fleet-tab-strip` Rust binary that used to draw an in-window
+# header pane at the top of overview was retired in PR #107. The tmux
+# status bar configured by style-tabs.sh (`status-position top`, iOS-style
+# pills, window-status-format with range=window markers) is now the single
+# canonical nav surface — visible on EVERY window, not just overview.
+#
+# Opting back into an in-window header pane via CODEX_FLEET_OVERVIEW_HEADER_ROWS
+# is still honoured for forward-compat, but defaults to 0 so the bringup
+# stops hunting for a binary that no longer exists (previous default of 1
+# fell into a warn branch on every fresh checkout → no header pane created
+# AND a stale "cargo build -p fleet-tab-strip" message printed for a crate
+# the workspace doesn't ship anymore).
 HEADER_ROWS="${CODEX_FLEET_OVERVIEW_HEADER_ROWS:-0}"
 HEADER_PANE_ID=""
 HEADER_CMD=""
 if (( HEADER_ROWS > 0 )); then
-  STRIP_BIN="$REPO/rust/target/release/fleet-tab-strip"
-  [ -x "$STRIP_BIN" ] || STRIP_BIN="$REPO/rust/target/debug/fleet-tab-strip"
-  if [ -x "$STRIP_BIN" ]; then
-    HEADER_CMD="env CODEX_FLEET_SESSION='$SESSION' '$STRIP_BIN'"
-  else
-    warn "fleet-tab-strip not built — overview header skipped (run: cargo build --release -p fleet-tab-strip)"
-    HEADER_ROWS=0
-  fi
+  warn "CODEX_FLEET_OVERVIEW_HEADER_ROWS=$HEADER_ROWS requested but fleet-tab-strip crate was retired (PR #107) — falling back to status-bar-only nav. Unset the env to silence."
+  HEADER_ROWS=0
 fi
 
 FLEET_APPLY_LAYOUT_BIN="$REPO/rust/target/release/fleet-apply-layout"
@@ -674,6 +725,24 @@ else
     die "fleet-apply-layout failed: $layout_output"
 fi
 log "overview layout applied via fleet-apply-layout (workers=$N_PANES, header_rows=$HEADER_ROWS)"
+
+# Default geometry: retile the 2-column preset into a uniform grid so every
+# pane has the same width/height. The Rust preset still owns *topology* (which
+# pane is the header, which are workers), we just override the geometry on top.
+# Operators who prefer the 2-column shape can set CODEX_FLEET_OVERVIEW_LAYOUT=preset.
+case "${CODEX_FLEET_OVERVIEW_LAYOUT:-tiled}" in
+  tiled)
+    tmux select-layout -t "$SESSION:overview" tiled >/dev/null 2>&1 || true
+    log "overview re-tiled into uniform grid (CODEX_FLEET_OVERVIEW_LAYOUT=tiled)"
+    ;;
+  preset|2col|two-column)
+    log "overview keeping fleet-layout 2-column preset (CODEX_FLEET_OVERVIEW_LAYOUT=$CODEX_FLEET_OVERVIEW_LAYOUT)"
+    ;;
+  *)
+    warn "unknown CODEX_FLEET_OVERVIEW_LAYOUT='$CODEX_FLEET_OVERVIEW_LAYOUT' — keeping preset"
+    ;;
+esac
+
 if (( HEADER_ROWS > 0 )); then
   HEADER_PANE_ID="$(tmux list-panes -t "$SESSION:overview" -F '#{@panel}|#{pane_id}' \
     | awk -F'|' '$1 == "[codex-fleet-tab-strip]" { print $2; exit }')"
@@ -725,6 +794,36 @@ while IFS='|' read -r id email tier specialty; do
   esac
   i=$((i + 1))
 done <<< "$ACCOUNTS"
+
+# 10.5  Add a 7-row "mascot strip" at the bottom of the overview window.
+#
+# Renders a small transparent Claude pixel-art + live fleet stats. The strip
+# pane is *added after* worker spawn so we don't disturb the
+# fleet-apply-layout topology — split-window -f -v -l 7 carves it from the
+# full-window height, then a final tiled retile gives us uniform workers + a
+# fixed-height strip. Operator opt-out: CODEX_FLEET_MASCOT_STRIP=0.
+#
+# Tuning via env: see ~/.local/bin/claude-mascot-strip --help-style comments
+# (CLAUDE_STRIP_IMG, CLAUDE_STRIP_INTERVAL, CLAUDE_STRIP_PLACE, …).
+if [ "${CODEX_FLEET_MASCOT_STRIP:-1}" = "1" ] && [ -x "$HOME/.local/bin/claude-mascot-strip" ]; then
+  # `-P -F '#{pane_id}'` makes split-window print the new pane's id directly,
+  # which is reliable. The list-panes + awk approach we tried first looked at
+  # `pane_current_command`, but a bash script exec'd from bash keeps the
+  # command name as `bash`, so the match silently dropped.
+  mascot_pid=$(tmux split-window -d -P -F '#{pane_id}' -f -v -l 7 \
+    -t "$SESSION:overview" \
+    "exec $HOME/.local/bin/claude-mascot-strip" 2>/dev/null || true)
+  if [ -n "$mascot_pid" ]; then
+    tmux set-option -p -t "$mascot_pid" '@panel' '[mascot-strip]' >/dev/null 2>&1 || true
+    tmux set-option -p -t "$mascot_pid" remain-on-exit on >/dev/null 2>&1 || true
+    # Pin the strip height back to 7 — tmux's tiled re-distribution above us
+    # would otherwise rescale everything uniformly.
+    tmux resize-pane -t "$mascot_pid" -y 7 >/dev/null 2>&1 || true
+    log "overview mascot strip spawned → $mascot_pid (CODEX_FLEET_MASCOT_STRIP=0 to disable)"
+  else
+    warn "overview mascot strip split-window did not return a pane id; strip skipped"
+  fi
+fi
 
 # 11. Create fleet / plan / waves windows
 log "creating fleet / plan / waves windows"
@@ -998,12 +1097,28 @@ CODEX_FLEET_SESSION="$TICKER_SESSION" bash "$SCRIPT_DIR/style-tabs.sh" >/dev/nul
 # global, so any non-`off` global value means the chrome is in place.
 expected_h="${STYLE_TABS_HEIGHT:-1}"
 chrome_status=$(tmux show-options -gv status 2>/dev/null || echo "")
+chrome_position=$(tmux show-options -gv status-position 2>/dev/null || echo "")
 case "$chrome_status" in
   ''|off|0)
-    warn "iOS chrome looks wrong: global status='$chrome_status' (expected on or ${expected_h})"
+    # Auto-correct: re-assert the bare minimum (status on, top-docked) so
+    # the operator gets a visible nav header even if style-tabs.sh partially
+    # failed. Previously the chrome was just `warn`-ed and left hidden,
+    # which surfaces as "the navigation header is not visible by default".
+    warn "iOS chrome verify: global status='$chrome_status' — forcing status=on, status-position=top"
+    tmux set-option -g status on >/dev/null 2>&1 || true
+    tmux set-option -g status-position top >/dev/null 2>&1 || true
+    tmux set-option -t "$SESSION" -u status >/dev/null 2>&1 || true
+    tmux set-option -t "$SESSION" -u status-position >/dev/null 2>&1 || true
+    tmux refresh-client -S >/dev/null 2>&1 || true
     ;;
   *)
-    log "iOS chrome verified: status=$chrome_status (target ${expected_h})"
+    if [ "$chrome_position" != "top" ]; then
+      warn "iOS chrome verify: status-position='$chrome_position' — forcing top"
+      tmux set-option -g status-position top >/dev/null 2>&1 || true
+      tmux set-option -t "$SESSION" -u status-position >/dev/null 2>&1 || true
+      tmux refresh-client -S >/dev/null 2>&1 || true
+    fi
+    log "iOS chrome verified: status=$chrome_status position=${chrome_position:-top} (target on/${expected_h}, top)"
     ;;
 esac
 
