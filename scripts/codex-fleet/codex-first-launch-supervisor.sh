@@ -38,15 +38,24 @@ drain_pane() {
   local pane="$1"
   local rounds=0
   local advanced=0
+  # Capture only the visible screen (no scrollback). Codex's worker loop
+  # echoes the original menu text back into tool-call history, which
+  # would otherwise produce false positives if we grep'd scrollback.
+  # `capture-pane` without -S sees just the live screen.
   while (( rounds < ROUNDS )); do
-    local snap; snap="$(tmx capture-pane -p -t "$pane" -S -25 2>/dev/null || true)"
+    local snap; snap="$(tmx capture-pane -p -t "$pane" 2>/dev/null || true)"
     [ -z "$snap" ] && return 0
     if printf '%s' "$snap" | grep -qE 'Do you trust the contents'; then
       tmx send-keys -t "$pane" Enter 2>/dev/null || true
       advanced=1
       sleep "$INTERVAL"
     elif printf '%s' "$snap" | grep -qE 'External agent config detected|Proceed with selected'; then
+      # Some Codex builds advance on bare `1`, others need `1` + Enter to
+      # confirm the selection. Send both to be robust — extra Enter on an
+      # already-advanced pane lands harmlessly in the (empty) input box.
       tmx send-keys -t "$pane" "1" 2>/dev/null || true
+      sleep 0.5
+      tmx send-keys -t "$pane" Enter 2>/dev/null || true
       advanced=1
       sleep "$INTERVAL"
     elif printf '%s' "$snap" | grep -qE 'Press enter to continue[[:space:]]*$'; then
