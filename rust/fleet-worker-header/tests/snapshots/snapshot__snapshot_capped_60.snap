@@ -1,0 +1,5 @@
+---
+source: fleet-worker-header/tests/snapshot.rs
+expression: "render(&capped_429(), 60)"
+---
+▲ codex-pyrit │ medium │ SI-3 retry col… │ 7m 00s │ cap: 429

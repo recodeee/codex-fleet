@@ -1,0 +1,5 @@
+---
+source: fleet-worker-header/tests/snapshot.rs
+expression: "render(&working(), 80)"
+---
+▲ codex-zazrifka │ high │ TE-2 src/edge module tree stubs │ 2m 14s │ cap: ok
