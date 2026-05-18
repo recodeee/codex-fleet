@@ -31,6 +31,20 @@
 //! | `IOS_ICON_CHIP`     | `#46464c` | 30×30 icon tile bg    |
 //! | `IOS_TINT_DARK`     | `#0764dc` | active-pill shadow    |
 //! | `IOS_TINT_SUB`      | `#d2e0ff` | Top-Hit subtitle fg   |
+//! | `IOS_CANVAS_BG`     | `#0b0d12` | dashboard canvas      |
+//! | `IOS_TERMINAL_FG`   | `#c9d1d9` | transcript fg         |
+//! | `IOS_TERMINAL_MUTED` | `#7d8590` | transcript muted fg  |
+//! | `IOS_TERMINAL_BLUE` | `#58a6ff` | transcript link fg    |
+//! | `IOS_FILL_04`       | `#15171b` | 4% white fill bucket  |
+//! | `IOS_FILL_06`       | `#1a1c20` | 6% white fill bucket  |
+//! | `IOS_FILL_08`       | `#1f2025` | 8% white fill bucket  |
+//! | `IOS_HAIRLINE_ALPHA_14` | `#2d2f33` | 14% white hairline |
+//! | `IOS_HAIRLINE_ALPHA_22` | `#414246` | 22% white hairline |
+//! | `IOS_HAIRLINE_ALPHA_25` | `#484a4d` | 25% white hairline |
+//! | `IOS_SUCCESS_SOFT`  | `#7adf95` | secondary success     |
+//! | `IOS_WARNING_SOFT`  | `#ffc068` | secondary warning     |
+//! | `IOS_WARNING_SOFT_BRIGHT` | `#ffe070` | bright warning   |
+//! | `IOS_DANGER_SOFT`   | `#ff8a82` | secondary danger      |
 
 use ratatui::style::Color;
 
@@ -62,6 +76,27 @@ pub const IOS_ICON_CHIP: Color = Color::Rgb(70, 70, 76);
 // Tint variants
 pub const IOS_TINT_DARK: Color = Color::Rgb(7, 100, 220);
 pub const IOS_TINT_SUB: Color = Color::Rgb(210, 224, 255);
+
+// Design-token follow-up buckets
+pub const IOS_CANVAS_BG: Color = Color::Rgb(11, 13, 18);
+pub const IOS_TERMINAL_FG: Color = Color::Rgb(201, 209, 217);
+pub const IOS_TERMINAL_MUTED: Color = Color::Rgb(125, 133, 144);
+pub const IOS_TERMINAL_BLUE: Color = Color::Rgb(88, 166, 255);
+
+// Opaque approximations of white-alpha fills over IOS_CANVAS_BG.
+pub const IOS_FILL_04: Color = Color::Rgb(21, 23, 27);
+pub const IOS_FILL_06: Color = Color::Rgb(26, 28, 32);
+pub const IOS_FILL_08: Color = Color::Rgb(31, 32, 37);
+pub const IOS_HAIRLINE_ALPHA: Color = Color::Rgb(45, 47, 51);
+pub const IOS_HAIRLINE_ALPHA_14: Color = IOS_HAIRLINE_ALPHA;
+pub const IOS_HAIRLINE_ALPHA_22: Color = Color::Rgb(65, 66, 70);
+pub const IOS_HAIRLINE_ALPHA_25: Color = Color::Rgb(72, 74, 77);
+
+// Softer status tones for larger fills and timeline/review accents.
+pub const IOS_SUCCESS_SOFT: Color = Color::Rgb(122, 223, 149);
+pub const IOS_WARNING_SOFT: Color = Color::Rgb(255, 192, 104);
+pub const IOS_WARNING_SOFT_BRIGHT: Color = Color::Rgb(255, 224, 112);
+pub const IOS_DANGER_SOFT: Color = Color::Rgb(255, 138, 130);
 
 #[cfg(test)]
 mod tests {
@@ -178,5 +213,77 @@ mod tests {
             Color::Rgb(0xd2, 0xe0, 0xff),
             "IOS_TINT_SUB must be #d2e0ff"
         );
+    }
+
+    #[test]
+    fn palette_design_gap_tokens() {
+        let cases = [
+            ("IOS_CANVAS_BG", IOS_CANVAS_BG, Color::Rgb(0x0b, 0x0d, 0x12)),
+            (
+                "IOS_TERMINAL_FG",
+                IOS_TERMINAL_FG,
+                Color::Rgb(0xc9, 0xd1, 0xd9),
+            ),
+            (
+                "IOS_TERMINAL_MUTED",
+                IOS_TERMINAL_MUTED,
+                Color::Rgb(0x7d, 0x85, 0x90),
+            ),
+            (
+                "IOS_TERMINAL_BLUE",
+                IOS_TERMINAL_BLUE,
+                Color::Rgb(0x58, 0xa6, 0xff),
+            ),
+            ("IOS_FILL_04", IOS_FILL_04, Color::Rgb(0x15, 0x17, 0x1b)),
+            ("IOS_FILL_06", IOS_FILL_06, Color::Rgb(0x1a, 0x1c, 0x20)),
+            ("IOS_FILL_08", IOS_FILL_08, Color::Rgb(0x1f, 0x20, 0x25)),
+            (
+                "IOS_HAIRLINE_ALPHA",
+                IOS_HAIRLINE_ALPHA,
+                Color::Rgb(0x2d, 0x2f, 0x33),
+            ),
+            (
+                "IOS_HAIRLINE_ALPHA_14",
+                IOS_HAIRLINE_ALPHA_14,
+                Color::Rgb(0x2d, 0x2f, 0x33),
+            ),
+            (
+                "IOS_HAIRLINE_ALPHA_22",
+                IOS_HAIRLINE_ALPHA_22,
+                Color::Rgb(0x41, 0x42, 0x46),
+            ),
+            (
+                "IOS_HAIRLINE_ALPHA_25",
+                IOS_HAIRLINE_ALPHA_25,
+                Color::Rgb(0x48, 0x4a, 0x4d),
+            ),
+            (
+                "IOS_SUCCESS_SOFT",
+                IOS_SUCCESS_SOFT,
+                Color::Rgb(0x7a, 0xdf, 0x95),
+            ),
+            (
+                "IOS_WARNING_SOFT",
+                IOS_WARNING_SOFT,
+                Color::Rgb(0xff, 0xc0, 0x68),
+            ),
+            (
+                "IOS_WARNING_SOFT_BRIGHT",
+                IOS_WARNING_SOFT_BRIGHT,
+                Color::Rgb(0xff, 0xe0, 0x70),
+            ),
+            (
+                "IOS_DANGER_SOFT",
+                IOS_DANGER_SOFT,
+                Color::Rgb(0xff, 0x8a, 0x82),
+            ),
+        ];
+
+        for (name, actual, expected) in cases {
+            assert_eq!(
+                actual, expected,
+                "{name} must stay anchored to docs/design-tokens.md"
+            );
+        }
     }
 }
