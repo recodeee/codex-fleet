@@ -1,5 +1,6 @@
 //! Shared ratatui UI primitives for the codex-fleet dashboard port.
 
+pub mod action_sheet_overlay;
 pub mod button;
 pub mod card;
 pub mod chip;
