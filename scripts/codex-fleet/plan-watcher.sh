@@ -127,12 +127,21 @@ run_plan_validator() {
   # both without losing the rc. set -e is enabled at the top of the script,
   # so we must guard the validator call so a non-zero exit doesn't abort
   # the watcher.
+  #
+  # F4 — Inherit --allow-waves so plans with depends_on don't fail the
+  # validator at runtime. full-bringup.sh already passes --allow-waves
+  # at publish time; the watcher must match. Operators can layer extra
+  # flags through CODEX_FLEET_PLAN_VALIDATOR_FLAGS without losing the
+  # baseline.
+  local extra_flags
+  # shellcheck disable=SC2206  # intentional word-split of operator-supplied flags
+  extra_flags=(${CODEX_FLEET_PLAN_VALIDATOR_FLAGS:-})
   local summary rc
   set +e
   if [ -x "$validator" ]; then
-    summary="$("$validator" "$plan_json" 2>/dev/null)"
+    summary="$("$validator" "$plan_json" --allow-waves "${extra_flags[@]}" 2>/dev/null)"
   else
-    summary="$(bash "$validator" "$plan_json" 2>/dev/null)"
+    summary="$(bash "$validator" "$plan_json" --allow-waves "${extra_flags[@]}" 2>/dev/null)"
   fi
   rc=$?
   set -e

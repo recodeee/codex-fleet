@@ -414,6 +414,43 @@ dispatch() {
     printf '[dry] dispatched %s/sub-%s -> pane=%s title=%s\n' "$slug" "$sub_idx" "$pane_idx" "$title"
     return
   fi
+  # F5 — Worker-ready gate. Codex panes that are mid-task or sitting in a
+  # first-launch interactive prompt reject `send-keys -l` with "not in a
+  # mode" and the dispatch is silently lost — and yet the Colony claim has
+  # already been consumed by the caller. Detect those cases up front and
+  # defer instead of pretending the dispatch landed.
+  #
+  # Two failure modes we filter out:
+  #   1. tmux copy-mode / scroll-back active (`pane_in_mode == 1`).
+  #   2. Codex pane not at its `›` input prompt yet — either still booting
+  #      or busy working. The bare `›` glyph in the last few visible lines
+  #      is a load-bearing signal that the input box is editable.
+  if [ "${FORCE_CLAIM_SKIP_READY_CHECK:-0}" != "1" ]; then
+    local in_mode
+    in_mode=$(tmux display-message -p -t "$SESSION:$WINDOW.$pane_idx" '#{pane_in_mode}' 2>/dev/null || echo "0")
+    if [ "$in_mode" = "1" ]; then
+      printf '[defer] pane %s in copy-mode; skipping %s/sub-%s (will retry next tick)\n' \
+        "$pane_idx" "$slug" "$sub_idx" >&2
+      return 1
+    fi
+    local visible
+    visible=$(tmux capture-pane -p -t "$SESSION:$WINDOW.$pane_idx" 2>/dev/null | tail -10)
+    if [ -z "$visible" ]; then
+      printf '[defer] pane %s blank capture; skipping %s/sub-%s\n' \
+        "$pane_idx" "$slug" "$sub_idx" >&2
+      return 1
+    fi
+    if ! printf '%s' "$visible" | grep -qE '›|tab to queue message'; then
+      printf '[defer] pane %s not at Codex input prompt; skipping %s/sub-%s\n' \
+        "$pane_idx" "$slug" "$sub_idx" >&2
+      return 1
+    fi
+    if printf '%s' "$visible" | grep -qE 'Working \([0-9]+|esc to interrupt'; then
+      printf '[defer] pane %s busy working; skipping %s/sub-%s\n' \
+        "$pane_idx" "$slug" "$sub_idx" >&2
+      return 1
+    fi
+  fi
   tmux send-keys -t "$SESSION:$WINDOW.$pane_idx" -l "$prompt"
   tmux send-keys -t "$SESSION:$WINDOW.$pane_idx" Enter
   printf 'dispatched %s/sub-%s -> pane=%s title=%s\n' "$slug" "$sub_idx" "$pane_idx" "$title"

@@ -147,3 +147,43 @@ codex-fleet · full view
 
 tmux: ctrl-b + <0..6> to jump · ctrl-b + n/p to cycle
 MAP
+
+# F1 — Dead-pane surfacing.
+# tmux's `#{pane_dead}` format flag returns "1" on panes whose child process
+# exited but tmux is keeping them open (remain-on-exit). They silently linger
+# in the overview chrome with `Pane is dead (signal 15, …)` until the operator
+# scrolls into them — observed live on the 2026-05-18 fleet runs.
+#
+# Emit a one-line JSON summary on stderr so it's grep-friendly. Markers under
+# /tmp/claude-viz/dead-pane-firstseen/ track first-seen timestamps so we can
+# alert on age >60s.
+dead_panes_report() {
+  local dead_total=0 dead_alert=0 now
+  now=$(date +%s)
+  local marker_dir="/tmp/claude-viz/dead-pane-firstseen"
+  mkdir -p "$marker_dir"
+  declare -a dead_panes_arr=()
+  while IFS=$'\t' read -r pane_id pane_dead pane_title; do
+    [ "$pane_dead" = "1" ] || continue
+    dead_total=$(( dead_total + 1 ))
+    dead_panes_arr+=("${pane_id}:${pane_title}")
+    local marker="$marker_dir/${pane_id//[^a-zA-Z0-9_-]/_}"
+    [ -f "$marker" ] || printf '%s' "$now" > "$marker"
+    local first; first=$(cat "$marker" 2>/dev/null || echo "$now")
+    if (( now - first > 60 )); then
+      dead_alert=$(( dead_alert + 1 ))
+    fi
+  done < <(tmux -L "$SOCKET" list-panes -t "$SESSION" -a -F '#{pane_id}	#{pane_dead}	#{pane_title}' 2>/dev/null || true)
+
+  local panes_csv=""
+  if (( dead_total > 0 )); then
+    panes_csv=$(printf '"%s",' "${dead_panes_arr[@]}")
+    panes_csv="${panes_csv%,}"
+  fi
+  printf '{"kind":"dead-pane-report","session":"%s","dead_panes":%s,"dead_alert":%s,"panes":[%s]}\n' \
+    "$SESSION" "$dead_total" "$dead_alert" "$panes_csv" >&2
+  if (( dead_alert > 0 )); then
+    log "ALERT: $dead_alert pane(s) dead for >60s — ${dead_panes_arr[*]}"
+  fi
+}
+dead_panes_report
