@@ -1,0 +1,11 @@
+OpenAI Codex CLI v0.42.0
+session id: 0193e7a4-9c2b-7b3e-9a01-2f3c8d5e4b22
+
+  Do you trust the contents of this directory?
+
+  /home/deadpool/Documents/codex-fleetui
+
+    1) Yes, trust this directory and continue
+    2) No, exit codex
+
+  >
