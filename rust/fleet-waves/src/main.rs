@@ -7,8 +7,8 @@
 //                this binary doesn't have yet.
 //   rows 3..=n:  gantt grid wrapped in a rounded IOS_HAIRLINE block, one row
 //                per Kahn topological wave. Each row: wave label, status
-//                chip, cascade-positioned bar with the wave's first task
-//                title, agent-initial badges on the right.
+//                chip, proportional cascade bar with the wave's first task
+//                title, TASKS and AGENTS columns on the right.
 //
 // Data: fleet-data::plan (newest plan.json under openspec/plans/*). Waves
 // come from a Kahn topological sort of `Subtask.depends_on`, provided by
@@ -35,9 +35,9 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use fleet_data::plan::{self, Plan};
 #[cfg(test)]
 use fleet_data::plan::Subtask;
+use fleet_data::plan::{self, Plan};
 use fleet_data::toposort::waves;
 use fleet_ui::{
     chip::{status_chip, ChipKind, CHIP_WIDTH},
@@ -288,6 +288,32 @@ fn wave_progress(indices: &[u32], plan: &Plan) -> (u32, u32) {
         }
     }
     (done, total)
+}
+
+fn active_wave_index(waves_v: &[Vec<u32>], plan: &Plan) -> Option<usize> {
+    waves_v
+        .iter()
+        .position(|indices| matches!(wave_status(indices, plan), WaveStatus::Working))
+        .or_else(|| {
+            waves_v
+                .iter()
+                .position(|indices| !matches!(wave_status(indices, plan), WaveStatus::Done))
+        })
+}
+
+fn wave_bar_width(indices: &[u32], track_w: u16, max_tasks: u16) -> u16 {
+    if track_w == 0 {
+        return 0;
+    }
+    let min_w = track_w.min(10);
+    let max_w = (((track_w as u32) * 72 + 50) / 100)
+        .max(min_w as u32)
+        .min(track_w as u32) as u16;
+    if max_tasks == 0 || max_w <= min_w {
+        return min_w;
+    }
+    let count = indices.len().max(1).min(max_tasks as usize) as u16;
+    min_w + (((max_w - min_w) as u32 * count as u32) / max_tasks as u32) as u16
 }
 
 fn agents_in_wave(indices: &[u32], plan: &Plan) -> (Vec<char>, u32) {
@@ -597,6 +623,21 @@ fn pad_visible(s: &str, width: u16) -> String {
     }
 }
 
+fn right_aligned(s: &str, width: u16) -> String {
+    let clipped = clip(s, width);
+    let cur = clipped.chars().count() as u16;
+    if cur >= width {
+        clipped
+    } else {
+        let mut out = String::new();
+        for _ in cur..width {
+            out.push(' ');
+        }
+        out.push_str(&clipped);
+        out
+    }
+}
+
 // iOS-style pill: ◖ <label> ◗ with caps in the fill colour against IOS_BG.
 fn pill_spans(label: &str, fill: Color, fg: Color) -> Vec<Span<'static>> {
     vec![
@@ -680,6 +721,51 @@ fn render_header(frame: &mut Frame, area: Rect, plan: Option<&Plan>, waves_v: &[
     }
 }
 
+fn render_timeline_header(
+    frame: &mut Frame,
+    track_area: Rect,
+    tasks_area: Rect,
+    agents_area: Rect,
+) {
+    if track_area.width > 0 {
+        let mut chars = vec!['─'; track_area.width as usize];
+        for pct in [0u16, 25, 50, 75, 100] {
+            let x = if track_area.width == 1 {
+                0
+            } else {
+                ((track_area.width - 1) as u32 * pct as u32 / 100) as usize
+            };
+            chars[x] = '┬';
+        }
+        let ticks: String = chars.into_iter().collect();
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                ticks,
+                Style::default().fg(IOS_HAIRLINE_STRONG),
+            )),
+            track_area,
+        );
+    }
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            right_aligned("TASKS", tasks_area.width),
+            Style::default()
+                .fg(IOS_FG_MUTED)
+                .add_modifier(Modifier::BOLD),
+        )),
+        tasks_area,
+    );
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            right_aligned("AGENTS", agents_area.width),
+            Style::default()
+                .fg(IOS_FG_MUTED)
+                .add_modifier(Modifier::BOLD),
+        )),
+        agents_area,
+    );
+}
+
 fn render_gantt(frame: &mut Frame, area: Rect, plan: &Plan, waves_v: &[Vec<u32>], tick: u64) {
     if area.height == 0 || waves_v.is_empty() {
         return;
@@ -694,30 +780,56 @@ fn render_gantt(frame: &mut Frame, area: Rect, plan: &Plan, waves_v: &[Vec<u32>]
     frame.render_widget(outer, area);
 
     // Per-row column budget inside the card:
-    //   [W-label 4] [chip CHIP_WIDTH] [gap 2] [bar track variable] [gap 2] [avatars 6]
+    //   [W-label 4] [chip CHIP_WIDTH] [gap 2] [bar track variable]
+    //   [gap 2] [TASKS 9] [gap 2] [AGENTS 8]
     const LABEL_W: u16 = 4;
     const GAP: u16 = 2;
-    const AVATAR_W: u16 = 6;
-    let fixed = LABEL_W + CHIP_WIDTH + GAP + GAP + AVATAR_W;
-    if inner.width <= fixed + 4 {
+    const TASKS_W: u16 = 9;
+    const AGENTS_W: u16 = 8;
+    let fixed = LABEL_W + CHIP_WIDTH + GAP + GAP + TASKS_W + GAP + AGENTS_W;
+    if inner.width <= fixed + 4 || inner.height < 2 {
         return;
     }
-    let track_w = inner.width - fixed;
+    let track_x = inner.x + LABEL_W + CHIP_WIDTH + GAP;
+    let agents_x = inner.x + inner.width - AGENTS_W;
+    let tasks_x = agents_x.saturating_sub(GAP + TASKS_W);
+    let track_w = tasks_x.saturating_sub(track_x + GAP);
+    if track_w == 0 {
+        return;
+    }
 
-    // Cascade: bar = 45% of the track, step distributes the remaining 55%
-    // across (total-1) intervals so W1 starts at the left edge and Wn lands
-    // at the right edge of the track.
     let total = waves_v.len();
-    let bar_w = ((track_w as f32) * 0.45).round().max(8.0) as u16;
-    let max_offset = track_w.saturating_sub(bar_w);
-    let step = if total > 1 {
-        (max_offset as f32) / ((total - 1) as f32)
-    } else {
-        0.0
-    };
+    let max_tasks = waves_v
+        .iter()
+        .map(|indices| indices.len() as u16)
+        .max()
+        .unwrap_or(1);
+    let active = active_wave_index(waves_v, plan);
+
+    render_timeline_header(
+        frame,
+        Rect {
+            x: track_x,
+            y: inner.y,
+            width: track_w,
+            height: 1,
+        },
+        Rect {
+            x: tasks_x,
+            y: inner.y,
+            width: TASKS_W,
+            height: 1,
+        },
+        Rect {
+            x: agents_x,
+            y: inner.y,
+            width: AGENTS_W,
+            height: 1,
+        },
+    );
 
     for (i, indices) in waves_v.iter().enumerate() {
-        let y = inner.y + i as u16;
+        let y = inner.y + 1 + i as u16;
         if y >= inner.y + inner.height {
             break;
         }
@@ -734,11 +846,16 @@ fn render_gantt(frame: &mut Frame, area: Rect, plan: &Plan, waves_v: &[Vec<u32>]
             width: CHIP_WIDTH,
             height: 1,
         };
-        let track_x = inner.x + LABEL_W + CHIP_WIDTH + GAP;
-        let avatar_area = Rect {
-            x: inner.x + inner.width - AVATAR_W,
+        let tasks_area = Rect {
+            x: tasks_x,
             y,
-            width: AVATAR_W,
+            width: TASKS_W,
+            height: 1,
+        };
+        let agents_area = Rect {
+            x: agents_x,
+            y,
+            width: AGENTS_W,
             height: 1,
         };
 
@@ -759,6 +876,13 @@ fn render_gantt(frame: &mut Frame, area: Rect, plan: &Plan, waves_v: &[Vec<u32>]
         };
         frame.render_widget(Paragraph::new(Line::from(status_chip(kind))), chip_area);
 
+        let bar_w = wave_bar_width(indices, track_w, max_tasks);
+        let max_offset = track_w.saturating_sub(bar_w);
+        let step = if total > 1 {
+            (max_offset as f32) / ((total - 1) as f32)
+        } else {
+            0.0
+        };
         let offset = (step * i as f32).round() as u16;
         let bar_x = track_x + offset.min(max_offset);
         let bar_area = Rect {
@@ -767,29 +891,59 @@ fn render_gantt(frame: &mut Frame, area: Rect, plan: &Plan, waves_v: &[Vec<u32>]
             width: bar_w,
             height: 1,
         };
-        render_wave_bar(frame, bar_area, indices, plan, ws, tick);
+        render_wave_bar(
+            frame,
+            bar_area,
+            indices,
+            plan,
+            ws,
+            active == Some(i),
+            tick + i as u64,
+        );
+
+        let (done, total_tasks) = wave_progress(indices, plan);
+        let task_style = if total_tasks > 0 && done == total_tasks {
+            Style::default().fg(IOS_GREEN).add_modifier(Modifier::BOLD)
+        } else if matches!(ws, WaveStatus::Working) {
+            Style::default().fg(IOS_TINT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(IOS_FG_MUTED)
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                right_aligned(&format!("{done}/{total_tasks}"), tasks_area.width),
+                task_style,
+            )),
+            tasks_area,
+        );
 
         let (initials, count) = agents_in_wave(indices, plan);
-        let badge_spans: Vec<Span<'static>> = if count == 0 {
-            vec![Span::styled("  —   ", Style::default().fg(IOS_FG_FAINT))]
+        let agent_label = if count == 0 {
+            "—".to_string()
         } else {
             let letters: String = initials.iter().collect();
-            vec![
-                Span::styled(
-                    format!(
-                        "◉{} ",
-                        if letters.is_empty() {
-                            "?".to_string()
-                        } else {
-                            letters
-                        }
-                    ),
-                    Style::default().fg(IOS_TINT).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(format!("{}", count), Style::default().fg(IOS_FG)),
-            ]
+            format!(
+                "{} {}",
+                if letters.is_empty() {
+                    "?".to_string()
+                } else {
+                    letters
+                },
+                count
+            )
         };
-        frame.render_widget(Paragraph::new(Line::from(badge_spans)), avatar_area);
+        let agent_style = if count == 0 {
+            Style::default().fg(IOS_FG_FAINT)
+        } else {
+            Style::default().fg(IOS_TINT).add_modifier(Modifier::BOLD)
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                right_aligned(&agent_label, agents_area.width),
+                agent_style,
+            )),
+            agents_area,
+        );
     }
 }
 
@@ -799,7 +953,8 @@ fn render_wave_bar(
     indices: &[u32],
     plan: &Plan,
     ws: WaveStatus,
-    tick: u64,
+    active: bool,
+    shimmer_phase: u64,
 ) {
     let title = first_task_title(indices, plan);
     let inner_w = bar_area.width.saturating_sub(2);
@@ -856,24 +1011,27 @@ fn render_wave_bar(
         }
     }
 
-    // Idle wave: one faint sweep cell at half the active-wave tempo keeps
-    // queued rows alive without reading as progress.
-    if matches!(ws, WaveStatus::Idle) && bar_area.width > 2 {
-        let phase = ((tick / 2) as u16) % bar_area.width;
-        let glyph = base_text
+    if active && matches!(ws, WaveStatus::Working) && bar_area.width > 4 {
+        let sweep_w = 3.min(bar_area.width);
+        let travel = bar_area.width.saturating_sub(sweep_w).max(1);
+        let sweep_x = (shimmer_phase as u16 % travel).min(travel);
+        let sweep_text: String = base_text
             .chars()
-            .nth(phase as usize)
-            .unwrap_or(' ')
-            .to_string();
+            .skip(sweep_x as usize)
+            .take(sweep_w as usize)
+            .collect();
         frame.render_widget(
             Paragraph::new(Span::styled(
-                glyph,
-                Style::default().fg(IOS_FG_FAINT).bg(IOS_HAIRLINE),
+                pad_visible(&sweep_text, sweep_w),
+                Style::default()
+                    .fg(IOS_FG)
+                    .bg(IOS_TINT)
+                    .add_modifier(Modifier::BOLD),
             )),
             Rect {
-                x: bar_area.x + phase,
+                x: bar_area.x + sweep_x,
                 y: bar_area.y,
-                width: 1,
+                width: sweep_w,
                 height: 1,
             },
         );
@@ -1349,15 +1507,15 @@ mod tests {
 "                                                                                                    "
 "                                                                                                    "
 "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮"
-"│W1  ◖ ● done    ◗   Lane 0 with deliberately long…                                          ◉C 1  │"
-"│W2  ◖ ● done    ◗        Lane 1 with deliberately long…                                     ◉C 1  │"
-"│W3  ◖ ● done    ◗             Lane 2 with deliberately long…                                ◉C 1  │"
-"│W4  ◖ ● working ◗                  Lane 3 with deliberately long…                           ◉C 1  │"
-"│W5  ◖ ● working ◗                       Lane 4 with deliberately long…                      ◉C 1  │"
-"│W6  ◖ ◌ idle    ◗                           Lane 5 with deliberately long…                  ◉C 1  │"
-"│W7  ◖ ◌ idle    ◗                                Lane 6 with deliberately long…             ◉C 1  │"
-"│W8  ◖ ◌ idle    ◗                                     Lane 7 with deliberately long…        ◉C 1  │"
-"│W9  ◖ ◌ idle    ◗                                          Lane 8 with deliberately long…   ◉C 1  │"
+"│                   ┬─────────────┬─────────────┬─────────────┬──────────────┬      TASKS    AGENTS│"
+"│W1  ◖ ● done    ◗   Lane 0 with deliberately long title for…                         1/1       C 1│"
+"│W2  ◖ ● done    ◗     Lane 1 with deliberately long title for…                       1/1       C 1│"
+"│W3  ◖ ● done    ◗       Lane 2 with deliberately long title for…                     1/1       C 1│"
+"│W4  ◖ ● working ◗         Lane 3 with deliberately long title for…                   0/1       C 1│"
+"│W5  ◖ ● working ◗           Lane 4 with deliberately long title for…                 0/1       C 1│"
+"│W6  ◖ ◌ idle    ◗             Lane 5 with deliberately long title for…               0/1       C 1│"
+"│W7  ◖ ◌ idle    ◗               Lane 6 with deliberately long title for…             0/1       C 1│"
+"│W8  ◖ ◌ idle    ◗                 Lane 7 with deliberately long title for…           0/1       C 1│"
 "╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
 "╭ LIVE FEED ─────────────────────────────────────────╮ ╭ AGENT LEADERBOARD ────────────────────────╮"
 "│12:00 ·  codex-alpha  claimed sub-task Lane 0 with d│ │#1  claude        1 done   █               │"
@@ -1432,5 +1590,20 @@ mod tests {
         assert_eq!(app.overlay, Overlay::None);
         assert!(app.spotlight_state.query.is_empty());
         assert_eq!(app.spotlight_state.selected, 0);
+    }
+
+    #[test]
+    fn active_wave_prefers_claimed_over_next_idle() {
+        let plan = lively_plan();
+        let waves_v = waves(&plan.tasks);
+        assert_eq!(active_wave_index(&waves_v, &plan), Some(3));
+    }
+
+    #[test]
+    fn wave_bar_width_scales_with_task_count() {
+        let narrow = vec![0];
+        let wide = vec![0, 1, 2, 3];
+        assert!(wave_bar_width(&wide, 80, 4) > wave_bar_width(&narrow, 80, 4));
+        assert!(wave_bar_width(&wide, 80, 4) <= 80);
     }
 }
