@@ -12,7 +12,8 @@
 //!
 //! - Caps (`◖` / `◗`) render with `bg = IOS_BG_SOLID` and `fg = <kind colour>`
 //!   so they punch a coloured half-circle out of the base surface.
-//! - Label (` ● <text> `) gets `bg = <kind colour>`, `fg = IOS_FG`, bold.
+//! - Label (` ● <text> `) gets `bg = <kind colour>`, a contrast-safe `fg`,
+//!   and bold text.
 //!
 //! The dot glyph and width-padding match the bash regression in
 //! `scripts/codex-fleet/test/test-status-chips.sh`.
@@ -59,6 +60,16 @@ impl ChipKind {
         }
     }
 
+    /// Pill foreground colour. Bright iOS fills need dark text to keep the
+    /// status labels readable; the neutral idle chip uses muted text.
+    pub fn fg(self) -> Color {
+        match self {
+            ChipKind::Idle => IOS_FG_MUTED,
+            ChipKind::Dead => IOS_FG,
+            _ => IOS_BG_SOLID,
+        }
+    }
+
     /// Status glyph inside the pill.
     pub fn dot(self) -> &'static str {
         match self {
@@ -96,14 +107,12 @@ impl ChipKind {
 /// adjacent caps butt against the label without extra spans.
 pub fn status_chip(kind: ChipKind) -> Vec<Span<'static>> {
     let bg = kind.bg();
+    let fg = kind.fg();
     vec![
         Span::styled(CAP_LEFT, Style::default().fg(bg).bg(BG)),
         Span::styled(
             format!(" {} {} ", kind.dot(), kind.label()),
-            Style::default()
-                .fg(IOS_FG)
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
         ),
         Span::styled(CAP_RIGHT, Style::default().fg(bg).bg(BG)),
     ]
@@ -119,7 +128,11 @@ mod tests {
     #[test]
     fn chip_renders_three_spans() {
         let spans = status_chip(ChipKind::Working);
-        assert_eq!(spans.len(), 3, "chip must be exactly 3 spans (cap, label, cap)");
+        assert_eq!(
+            spans.len(),
+            3,
+            "chip must be exactly 3 spans (cap, label, cap)"
+        );
         assert_eq!(spans[0].content, "◖");
         assert_eq!(spans[2].content, "◗");
     }
@@ -138,7 +151,12 @@ mod tests {
             ChipKind::Boot,
             ChipKind::Dead,
         ] {
-            assert_eq!(kind.label().chars().count(), 7, "label({:?}) must be 7 chars wide for alignment", kind);
+            assert_eq!(
+                kind.label().chars().count(),
+                7,
+                "label({:?}) must be 7 chars wide for alignment",
+                kind
+            );
         }
     }
 
@@ -155,5 +173,60 @@ mod tests {
     #[test]
     fn capped_chip_uses_systemred() {
         assert_eq!(ChipKind::Capped.bg(), IOS_DESTRUCTIVE);
+    }
+
+    #[test]
+    fn idle_chip_uses_muted_foreground() {
+        assert_eq!(ChipKind::Idle.fg(), IOS_FG_MUTED);
+    }
+
+    #[test]
+    fn status_chip_label_foregrounds_are_accessible() {
+        for kind in [
+            ChipKind::Working,
+            ChipKind::Idle,
+            ChipKind::Polling,
+            ChipKind::Done,
+            ChipKind::Live,
+            ChipKind::Blocked,
+            ChipKind::Capped,
+            ChipKind::Approval,
+            ChipKind::Boot,
+            ChipKind::Dead,
+        ] {
+            assert!(
+                contrast_ratio(kind.fg(), kind.bg()) >= 4.5,
+                "{:?} foreground must contrast with its fill",
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn status_chip_uses_kind_foreground_on_label_span() {
+        let spans = status_chip(ChipKind::Live);
+        assert_eq!(spans[1].style.fg, Some(ChipKind::Live.fg()));
+        assert_eq!(spans[1].style.bg, Some(ChipKind::Live.bg()));
+    }
+
+    fn contrast_ratio(fg: Color, bg: Color) -> f64 {
+        let fg = relative_luminance(fg);
+        let bg = relative_luminance(bg);
+        (fg.max(bg) + 0.05) / (fg.min(bg) + 0.05)
+    }
+
+    fn relative_luminance(color: Color) -> f64 {
+        let Color::Rgb(r, g, b) = color else {
+            panic!("chip colours must be RGB constants");
+        };
+        let [r, g, b] = [r, g, b].map(|channel| {
+            let channel = f64::from(channel) / 255.0;
+            if channel <= 0.039_28 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        });
+        0.2126 * r + 0.7152 * g + 0.0722 * b
     }
 }
