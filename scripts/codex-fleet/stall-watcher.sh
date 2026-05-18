@@ -12,6 +12,23 @@
 #       NDJSON at $FLEET_STATE_DIR/stall-watcher.log so we never deadlock
 #       on Colony being unreachable.
 #
+#       Per-pane dismissed-recently cache (SI-12): after dispatching keys
+#       for (pane, kind), the daemon records the unix timestamp into the
+#       in-memory DISMISSED_AT associative array keyed by "<pane>:<kind>".
+#       Subsequent ticks consult should_dispatch_dismissal() before any
+#       send-keys: if (now - DISMISSED_AT[pane:kind]) is less than
+#       CODEX_FLEET_DISMISS_COOLDOWN_SECONDS (default 30), the dispatch is
+#       suppressed silently (no log line, no key injection). This closes
+#       the regression where the same trust-dir prompt was still visible
+#       in capture-pane buffer 5s after dismissal, causing a literal '1'
+#       to be re-injected into the codex chat buffer as a user message.
+#       The cache is in-memory only and clears on daemon restart.
+#
+#   ENV vars consumed:
+#     CODEX_FLEET_DISMISS_COOLDOWN_SECONDS  (default 30)
+#         Per-(pane,kind) suppression window in seconds. Set to 0 to
+#         disable the cooldown (every detection dispatches).
+#
 #   (2) rescue stranded plan claims so the queue keeps moving, and hand
 #       the released slot to the supervisor for takeover-worker spawning.
 #       This is the original behaviour of stall-watcher.sh: one codex
@@ -104,6 +121,62 @@ keys_for_kind() {
     plan-prompt)    printf '\r' ;;
     *)              return 1 ;;
   esac
+}
+
+# ---------- dismissed-recently cache (SI-12, sourceable) -----------------
+#
+# DISMISSED_AT — associative array keyed by "<pane>:<kind>", values are
+# unix epoch seconds of the last successful dispatch. In-memory only;
+# cleared on daemon restart. Declared with `-gA` so it survives whether
+# the file is sourced (test harness) or executed (daemon).
+declare -gA DISMISSED_AT 2>/dev/null || declare -A DISMISSED_AT
+
+# DISMISS_COOLDOWN_SECONDS — read from CODEX_FLEET_DISMISS_COOLDOWN_SECONDS
+# (default 30). Reread on each `should_dispatch_dismissal` call so tests
+# can mutate the env var between calls without re-sourcing.
+_dismiss_cooldown_seconds() {
+  local v="${CODEX_FLEET_DISMISS_COOLDOWN_SECONDS:-30}"
+  # Validate: must be a non-negative integer. Anything else falls back to
+  # the default to avoid arithmetic errors in `should_dispatch_dismissal`.
+  case "$v" in
+    ''|*[!0-9]*) printf '30\n' ;;
+    *)           printf '%s\n' "$v" ;;
+  esac
+}
+
+# should_dispatch_dismissal <pane> <kind>
+#   Exit 0 if the caller is allowed to dispatch keys for (pane, kind);
+#   exit 1 if the dispatch must be suppressed because a previous dispatch
+#   for the same (pane, kind) is still within the cooldown window.
+#   Stateless from the caller's view: pure read against DISMISSED_AT.
+should_dispatch_dismissal() {
+  local pane="$1" kind="$2"
+  local key="${pane}:${kind}"
+  local prev="${DISMISSED_AT[$key]:-}"
+  if [ -z "$prev" ]; then
+    return 0
+  fi
+  local cooldown now
+  cooldown="$(_dismiss_cooldown_seconds)"
+  if [ "$cooldown" -le 0 ]; then
+    return 0
+  fi
+  now="$(date -u +%s)"
+  if [ $(( now - prev )) -lt "$cooldown" ]; then
+    return 1
+  fi
+  return 0
+}
+
+# record_dismissal <pane> <kind> [<ts>]
+#   Stamp DISMISSED_AT[pane:kind] with `ts` (defaults to now). Tests pass
+#   an explicit ts to simulate older entries deterministically.
+record_dismissal() {
+  local pane="$1" kind="$2" ts="${3:-}"
+  if [ -z "$ts" ]; then
+    ts="$(date -u +%s)"
+  fi
+  DISMISSED_AT["${pane}:${kind}"]="$ts"
 }
 
 # Stop here if we were sourced (test harness path).
@@ -257,6 +330,14 @@ prompt_tick() {
     if [ "$kind" = "none" ]; then
       continue
     fi
+    # SI-12: suppress re-dispatch within the per-(pane,kind) cooldown
+    # window. The codex-CLI capture buffer keeps the dismissed prompt
+    # visible for a few seconds after a successful dismissal, which used
+    # to cause us to re-inject the same keys (e.g. literal '1') as a
+    # follow-up user message. Skip silently — no log, no send-keys.
+    if ! should_dispatch_dismissal "$pane" "$kind"; then
+      continue
+    fi
     if ! keys="$(keys_for_kind "$kind")"; then
       continue
     fi
@@ -264,6 +345,7 @@ prompt_tick() {
     # interpreted as Enter so we use the default (non-literal) mode and
     # pass keys as a single argument.
     if command tmux -L codex-fleet send-keys -t "$pane" "$keys" 2>/dev/null; then
+      record_dismissal "$pane" "$kind"
       ndjson_log "$kind" "$pane" "$keys"
       if ! colony_post_dismiss "$kind" "$pane"; then
         # Colony post failed — we already logged via ndjson_log.
@@ -316,7 +398,7 @@ rescue_tick() {
       done
 }
 
-log "starting (mode=$MODE older-than=$OLDER_THAN interval=${INTERVAL}s prompt-interval=${PROMPT_INTERVAL}s apply=$APPLY_FLAG queue=$QUEUE_FILE)"
+log "starting (mode=$MODE older-than=$OLDER_THAN interval=${INTERVAL}s prompt-interval=${PROMPT_INTERVAL}s dismiss-cooldown=$(_dismiss_cooldown_seconds)s apply=$APPLY_FLAG queue=$QUEUE_FILE)"
 
 if [ "$ONCE" = "1" ]; then
   case "$MODE" in
