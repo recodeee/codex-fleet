@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "plan_slug": "env-prop-fixture-test",
+  "title": "env-prop-fixture-test — minimal no-op plan for the SI-13 env-propagation smoke test",
+  "problem": "The SI-11 plan-routing-filter sets FLEET_DEFAULT_SPECIALTY at bringup time when the priority plan's writable_roots are foreign (outside the codex-fleet repo family). Historically the codex CLI scrubbed CODEX_FLEET_* env vars between spawn and prompt-execution, so the spawned worker observed them as empty even though bringup logged them as set. This fixture exists solely to drive scripts/codex-fleet/test/run-env-propagation.sh: it pins writable_roots to a foreign path (/tmp/env-prop-test) so SI-11 fires, declares one trivial no-op subtask so plan-validator + colony plan publish are happy, and lives entirely outside the operator's real plans/ directory.",
+  "acceptance_criteria": [
+    "Bringup with --plan-slug env-prop-fixture-test sets CODEX_FLEET_SPECIALTY=env-prop-fixture-test in every spawned worker pane (foreign writable_roots forces SI-11 routing-filter to pin the specialty).",
+    "printenv CODEX_FLEET_SPECIALTY CODEX_FLEET_TIER CODEX_FLEET_AGENT_NAME CODEX_FLEET_WORKER_CWD inside the spawned codex CLI returns non-empty values for all four variables.",
+    "run-env-propagation.sh tears down the fixture tmux session and removes /tmp/env-prop-test on exit, leaving no orphan state behind."
+  ],
+  "roles": [
+    "verifier"
+  ],
+  "tasks": [
+    {
+      "subtask_index": 0,
+      "title": "[fixture] no-op env-propagation marker",
+      "description": "No-op task. This plan exists only to drive the SI-13 env-propagation smoke test in scripts/codex-fleet/test/run-env-propagation.sh. The test brings up a single-pane fleet against this plan with CODEX_FLEET_TMUX_SOCKET=codex-fleet-test, sends printenv to the spawned codex CLI, asserts the four CODEX_FLEET_* vars are populated, and then tears the fleet down. No worker is ever expected to claim or complete this task; the fixture file_scope path lives under the fixture writable_root and is never written.",
+      "file_scope": [
+        "/tmp/env-prop-test/.env-prop-marker"
+      ],
+      "depends_on": [],
+      "spec_row_id": null,
+      "capability_hint": "fixture_noop",
+      "status": "available",
+      "claimed_by_session_id": null,
+      "claimed_by_agent": null,
+      "completed_summary": null
+    }
+  ],
+  "metadata": {
+    "writable_roots": [
+      "/tmp/env-prop-test"
+    ]
+  }
+}
