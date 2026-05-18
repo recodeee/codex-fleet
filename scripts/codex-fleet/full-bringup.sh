@@ -781,6 +781,11 @@ ticker_window plan-watcher "CODEX_FLEET_SESSION=$SESSION CODEX_FLEET_REPO_ROOT=$
 # new completions within the hour.
 ticker_window auto-reviewer "bash $SCRIPT_DIR/auto-reviewer.sh --loop --interval=300"
 
+# pr-babysitter: every 60s, scans open fleet PRs for CI failures and hands the
+# claim back to the available pool (up to 3 retries) so a fresh worker can pick
+# it up — closes the gap where a worker has already moved on or exited.
+ticker_window pr-babysitter "bash $SCRIPT_DIR/pr-babysitter.sh"
+
 # stall-watcher: every 60s, `colony rescue stranded --apply` releases claims
 # held > 30m without progress, then enqueues a takeover_recommended event
 # per rescued agent into /tmp/claude-viz/supervisor-queue.jsonl.

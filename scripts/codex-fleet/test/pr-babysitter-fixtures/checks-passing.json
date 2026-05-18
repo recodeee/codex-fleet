@@ -1,0 +1,48 @@
+[
+  {
+    "number": 4301,
+    "title": "feat(edge): [TE-1] protocol::MarketClass taxonomy enum",
+    "url": "https://github.com/recodeee/polymarket-cli/pull/4301",
+    "headRefName": "agent/codex/edge-te1-marketclass-2026-05-18",
+    "statusCheckRollup": [
+      {
+        "name": "cargo-fmt",
+        "conclusion": "SUCCESS",
+        "status": "COMPLETED"
+      },
+      {
+        "name": "cargo-clippy",
+        "conclusion": "SUCCESS",
+        "status": "COMPLETED"
+      },
+      {
+        "name": "cargo-test",
+        "conclusion": "SUCCESS",
+        "status": "COMPLETED"
+      }
+    ]
+  },
+  {
+    "number": 4302,
+    "title": "feat(fleet): [SI-1] fleet-mcp stdio server",
+    "url": "https://github.com/recodeee/codex-fleetui/pull/4302",
+    "headRefName": "agent/claude-supervisor/si-1-fleet-mcp",
+    "statusCheckRollup": [
+      {
+        "name": "shellcheck",
+        "conclusion": "SUCCESS",
+        "status": "COMPLETED"
+      },
+      {
+        "name": "ci-smoke",
+        "conclusion": "NEUTRAL",
+        "status": "COMPLETED"
+      },
+      {
+        "name": "ci-skipped",
+        "conclusion": "SKIPPED",
+        "status": "COMPLETED"
+      }
+    ]
+  }
+]
