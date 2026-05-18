@@ -1,0 +1,13 @@
+OpenAI Codex CLI v0.42.0
+account: codex-zazrifka
+
+  External agent config detected at /home/deadpool/.codex/agents/colony.toml
+
+  How should I handle external agent integrations going forward?
+
+    1) Use external agents (ask each session)
+    2) Use external agents (always)
+    3) Don't ask again, ignore external agents
+    4) Exit codex
+
+  >
