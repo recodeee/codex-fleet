@@ -89,17 +89,32 @@ the file-claim, gx, or PR-merge contracts in this prompt.
 ## Loop
 
 ```
+1. empty_streak = 0   # tracked per-pane; reset whenever ready.ready is non-empty
 2. ready = mcp__colony__task_ready_for_agent({ agent: $CODEX_FLEET_AGENT_NAME, limit: 1 })
 3. if ready.ready is empty:
+     empty_streak += 1
+     if empty_streak >= IDLE_EXIT_THRESHOLD (default 5, i.e. ~5 minutes idle):
+       task_post(kind:'note', content:'idle-exit: empty_streak=<n>; supervisor will respawn on demand')
+       exit 0     # native heap is reclaimed; supervisor watcher respawns the pane
+                  # only when Colony reports new claimable work for this account.
      if ready.next_action contains "rescue" or ready.next_tool == "rescue_stranded_scan":
        sleep 60   # claim-release-supervisor daemon owns rescue; do not loop on it
      else:
        sleep 60
      goto 2
-4. task = ready.ready[0]
+4. empty_streak = 0
+   task = ready.ready[0]
 ```
 
 Then preflight, claim, work, report. Sequence below.
+
+**Why the idle-exit.** Each codex CLI holds ~200-400 MB of native heap that
+does not shrink while idle. Leaving 8 workers spinning at `sleep 60` keeps
+~2-3 GB of RSS resident even when no plan is claimable. Exiting after 5
+consecutive empty polls (~5 min idle) drops the floor to active workers
+only; the supervisor / `claim-release-supervisor.sh` respawns the pane on
+the next Colony work signal. Override with `IDLE_EXIT_THRESHOLD=0` in the
+pane env to disable the auto-exit for that one pane.
 
 ### Tier + specialty gate (REQUIRED before preflight)
 

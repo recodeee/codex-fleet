@@ -143,20 +143,35 @@ RESERVE_ACCOUNTS=(
   admin-kollarrobert admin-mite bia-zazrifka fico-magnolia
   koncita-pipacs mesi-lebenyse recodee-mite ricsi-zazrifka
 )
+# Worker count is now parameterizable. Default halved from 8 → 4 to cut
+# the codex-fleet-2 RSS floor by ~50% (each codex CLI holds ~200-400 MB
+# of native heap that does not shrink while idle). Bump back via
+# `WORKER_COUNT=8 bash codex-fleet-2.sh ...` when a heavy plan needs
+# more parallel lanes; the array above caps the upper bound.
+WORKER_COUNT="${WORKER_COUNT:-4}"
+if (( WORKER_COUNT < 1 )); then WORKER_COUNT=1; fi
+if (( WORKER_COUNT > ${#RESERVE_ACCOUNTS[@]} )); then
+  WORKER_COUNT=${#RESERVE_ACCOUNTS[@]}
+fi
 worker_cmd_for() {
   local acct="$1"
   # Launch codex directly as the pane command (matches codex-fleet:overview's
   # pattern in scripts/codex-fleet/full-bringup.sh). codex inherits the pane's
   # TTY cleanly because we skip the bash-lc indirection. The guard wrapper
   # (codex-guard.sh) sees CODEX_GUARD_BYPASS=1 and execs the real codex.
-  printf 'env CODEX_GUARD_BYPASS=1 CODEX_HOME=/tmp/codex-fleet/%s CODEX_FLEET_AGENT_NAME=codex-fleet-2-%s CODEX_FLEET_ACCOUNT=%s CODEX_FLEET_SESSION=%s codex --dangerously-bypass-approvals-and-sandbox --add-dir /home/deadpool/Documents/codex-fleet --add-dir /home/deadpool/Documents/codex-fleetui' \
+  #
+  # NODE_OPTIONS=--max-old-space-size=400 caps any Node MCP-server child the
+  # codex binary spawns. codex itself is a native binary so the V8 flag
+  # does not apply to its own heap, but it keeps helper Node processes
+  # from growing unbounded.
+  printf 'env CODEX_GUARD_BYPASS=1 NODE_OPTIONS=--max-old-space-size=400 CODEX_HOME=/tmp/codex-fleet/%s CODEX_FLEET_AGENT_NAME=codex-fleet-2-%s CODEX_FLEET_ACCOUNT=%s CODEX_FLEET_SESSION=%s codex --dangerously-bypass-approvals-and-sandbox --add-dir /home/deadpool/Documents/codex-fleet --add-dir /home/deadpool/Documents/codex-fleetui' \
     "$acct" "$acct" "$acct" "$SESSION"
 }
-# Force a generous virtual size so 8 worker splits have room before the
+# Force a generous virtual size so the worker splits have room before the
 # kitty client attaches. tmux resizes to the client on attach anyway.
 tmux new-session -d -s "$SESSION" -x 274 -y 78 -n overview \
   "$(worker_cmd_for "${RESERVE_ACCOUNTS[0]}")"
-for i in 1 2 3 4 5 6 7; do
+for (( i = 1; i < WORKER_COUNT; i++ )); do
   acct="${RESERVE_ACCOUNTS[$i]}"
   tmux split-window -t "$SESSION:overview" "$(worker_cmd_for "$acct")" >/dev/null 2>&1 || true
   tmux select-layout -t "$SESSION:overview" tiled >/dev/null
