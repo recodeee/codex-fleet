@@ -110,7 +110,11 @@ preflight_warn() { warn "preflight: $*"; }
 # is running so every fleet worker can read/write task context from boot.
 # Idempotent + non-fatal: if Colony is unhealthy the fleet still spawns and
 # falls back to shell-CLI calls, matching the worker-prompt's fallback path.
-fleet_ensure_colony_running
+if declare -F fleet_ensure_colony_running >/dev/null 2>&1; then
+  fleet_ensure_colony_running
+else
+  warn "fleet_ensure_colony_running helper unavailable; continuing with MCP preflight result"
+fi
 
 FLEET_CONFIG_TMPL="${CODEX_FLEET_CONFIG_TMPL:-$SCRIPT_DIR/fleet-config.toml.tmpl}"
 
@@ -656,28 +660,9 @@ tmux set-option -w -t "$SESSION:overview" remain-on-exit on
 # silently hiding the tab strip.
 
 # 8.5 + 9. Apply the typed overview layout. fleet-layout owns the pane
-# topology now; full-bringup only decides operator policy (header rows
-# and worker spawn metadata).
-#
-# The legacy `fleet-tab-strip` Rust binary that used to draw an in-window
-# header pane at the top of overview was retired in PR #107. The tmux
-# status bar configured by style-tabs.sh (`status-position top`, iOS-style
-# pills, window-status-format with range=window markers) is now the single
-# canonical nav surface — visible on EVERY window, not just overview.
-#
-# Opting back into an in-window header pane via CODEX_FLEET_OVERVIEW_HEADER_ROWS
-# is still honoured for forward-compat, but defaults to 0 so the bringup
-# stops hunting for a binary that no longer exists (previous default of 1
-# fell into a warn branch on every fresh checkout → no header pane created
-# AND a stale "cargo build -p fleet-tab-strip" message printed for a crate
-# the workspace doesn't ship anymore).
-HEADER_ROWS="${CODEX_FLEET_OVERVIEW_HEADER_ROWS:-0}"
-HEADER_PANE_ID=""
-HEADER_CMD=""
-if (( HEADER_ROWS > 0 )); then
-  warn "CODEX_FLEET_OVERVIEW_HEADER_ROWS=$HEADER_ROWS requested but fleet-tab-strip crate was retired (PR #107) — falling back to status-bar-only nav. Unset the env to silence."
-  HEADER_ROWS=0
-fi
+# topology now; full-bringup only supplies worker count / spawn metadata.
+# Plan codex-fleet-glass-menu-drop-tabstrip-2026-05-15 removed the standalone
+# overview header pane, so force the preset's optional header to 0 rows.
 
 FLEET_APPLY_LAYOUT_BIN="$REPO/rust/target/release/fleet-apply-layout"
 [ -x "$FLEET_APPLY_LAYOUT_BIN" ] || FLEET_APPLY_LAYOUT_BIN="$REPO/rust/target/debug/fleet-apply-layout"
@@ -687,12 +672,9 @@ LAYOUT_RUNNER=( "$FLEET_APPLY_LAYOUT_BIN" )
 LAYOUT_ARGS=(
   --target "$SESSION:overview"
   --preset overview-header-tile
-  --header-rows "$HEADER_ROWS"
+  --header-rows 0
   --workers "$N_PANES"
 )
-if [ -n "$HEADER_CMD" ]; then
-  LAYOUT_ARGS+=( --header-cmd "$HEADER_CMD" )
-fi
 
 # fleet-apply-layout is a Rust binary, so it cannot see the shell `tmux`
 # function from lib/_tmux.sh. When full-bringup runs on a dedicated tmux
@@ -724,11 +706,11 @@ else
   layout_output="$("${LAYOUT_RUNNER[@]}" "${LAYOUT_ARGS[@]}" 2>&1)" || \
     die "fleet-apply-layout failed: $layout_output"
 fi
-log "overview layout applied via fleet-apply-layout (workers=$N_PANES, header_rows=$HEADER_ROWS)"
+log "overview layout applied via fleet-apply-layout (workers=$N_PANES, header_rows=0)"
 
 # Default geometry: retile the 2-column preset into a uniform grid so every
-# pane has the same width/height. The Rust preset still owns *topology* (which
-# pane is the header, which are workers), we just override the geometry on top.
+# pane has the same width/height. The Rust preset still owns worker topology;
+# this only overrides geometry on top.
 # Operators who prefer the 2-column shape can set CODEX_FLEET_OVERVIEW_LAYOUT=preset.
 case "${CODEX_FLEET_OVERVIEW_LAYOUT:-tiled}" in
   tiled)
@@ -743,20 +725,11 @@ case "${CODEX_FLEET_OVERVIEW_LAYOUT:-tiled}" in
     ;;
 esac
 
-if (( HEADER_ROWS > 0 )); then
-  HEADER_PANE_ID="$(tmux list-panes -t "$SESSION:overview" -F '#{@panel}|#{pane_id}' \
-    | awk -F'|' '$1 == "[codex-fleet-tab-strip]" { print $2; exit }')"
-  [ -n "$HEADER_PANE_ID" ] || die "fleet-apply-layout did not mark the overview header pane"
-  tmux set-option -p -t "$HEADER_PANE_ID" remain-on-exit off
-  log "overview header pane installed → $HEADER_PANE_ID ($HEADER_ROWS row(s))"
-fi
-
-# 10. Spawn codex into each pane with CODEX_GUARD_BYPASS=1. Filter the
-# pane list to exclude the header pane so workers don't get spawned on
-# top of the strip.
+# 10. Spawn codex into each pane with CODEX_GUARD_BYPASS=1. Plan
+# codex-fleet-glass-menu-drop-tabstrip-2026-05-15 removed the overview
+# header pane, so every pane in the overview window is a worker pane.
 log "launching $N_PANES codex workers"
-PANE_IDS=( $(tmux list-panes -t "$SESSION:overview" -F '#{@panel}|#{pane_id}' \
-  | awk -F'|' '$1 != "[codex-fleet-tab-strip]" { print $2 }') )
+mapfile -t PANE_IDS < <(tmux list-panes -t "$SESSION:overview" -F '#{pane_id}')
 [ "${#PANE_IDS[@]}" -eq "$N_PANES" ] || die "overview layout produced ${#PANE_IDS[@]} worker panes, expected $N_PANES"
 i=0
 while IFS='|' read -r id email tier specialty; do
