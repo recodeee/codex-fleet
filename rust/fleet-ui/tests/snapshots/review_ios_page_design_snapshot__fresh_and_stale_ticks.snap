@@ -1,0 +1,12 @@
+---
+source: fleet-ui/tests/review_ios_page_design_snapshot.rs
+expression: out
+---
+"                                                "
+" ◖ ● auto-reviewer on · last 2s ◗               "
+"                                                "
+
+---
+"                                                "
+" ◖ ◎ auto-reviewer on · last 44s ◗              "
+"                                                "
