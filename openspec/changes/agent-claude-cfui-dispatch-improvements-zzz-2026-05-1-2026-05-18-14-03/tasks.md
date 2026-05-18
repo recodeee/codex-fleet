@@ -26,6 +26,7 @@ Owned by 6 fleet subtasks in `openspec/plans/fleet-dispatch-fixes-2026-05-18/pla
 - [ ] 2.4 **F4 — plan-watcher inherits --allow-waves**: pass flag from `run_plan_validator()`; env override.
 - [ ] 2.5 **F5 — Worker-ready signal + retry**: `force-claim.sh` reads pane input-mode before send-keys; backoff on not-ready.
 - [ ] 2.6 **F6 — Codex auto-submit smoke test + fix**: script a 1-pane fleet through claim→execute→status; assert worker starts.
+- [x] 2.7 **F7 — Codex first-launch prompt auto-bypass**: `scripts/codex-fleet/codex-first-launch-supervisor.sh` seeded in this branch; wire into `full-bringup.sh` as a fleet subtask (sub-6 in `openspec/plans/fleet-dispatch-fixes-2026-05-18/plan.json`).
 
 ## 3. Verification
 

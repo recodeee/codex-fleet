@@ -2,7 +2,7 @@
 
 ## Rollup
 
-- available: 6
+- available: 7
 - claimed: 0
 - completed: 0
 - blocked: 0
@@ -15,3 +15,4 @@
 - [ ] sub-3 F4 — plan-watcher inherits --allow-waves [available]
 - [ ] sub-4 F5 — Worker-ready signal + retry in force-claim [available]
 - [ ] sub-5 F6 — Codex auto-submit smoke test + fix [available]
+- [ ] sub-6 F7 — Wire codex-first-launch-supervisor.sh into full-bringup.sh [available]
