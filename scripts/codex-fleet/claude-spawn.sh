@@ -89,6 +89,19 @@
 
 set -eo pipefail
 
+# SI-16: enforce CODEX_FLEET_AGENT_NAME at script entry, BEFORE any tmux
+# operations, env staging, or pane creation. Spawning a pane that would
+# self-identify as the generic 'codex' agent causes Colony's matchmaker
+# to see multiple panes as one logical agent, which in turn causes
+# overlapping task_ready_for_agent claims and confused handoffs (observed
+# 2026-05-18 during the pt2 trading-edge run). Fail fast here so the
+# operator can fix accounts.yml / the spawning daemon before any pane
+# state is mutated.
+if [ -z "${CODEX_FLEET_AGENT_NAME:-}" ]; then
+  echo "[claude-spawn] FATAL: CODEX_FLEET_AGENT_NAME not set; refusing to spawn a pane that would identify as the generic 'codex' agent. Set it via accounts.yml or the parent process env." >&2
+  exit 2
+fi
+
 # shellcheck source=lib/_tmux.sh
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/lib/_tmux.sh"
@@ -263,6 +276,18 @@ build_pane_cmd() {
   local env_str
   env_str="CLAUDE_FLEET_AGENT_NAME='$agent' CLAUDE_FLEET_ACCOUNT_LABEL='$label' CLAUDE_FLEET_TIER='$TIER' CLAUDE_FLEET_SPECIALTY='$SPECIALTY' CLAUDE_FLEET_MODEL='$MODEL'"
   env_str="$env_str CODEX_HOME='$CODEX_HOME'"
+  # SI-16: also propagate the CODEX_FLEET_* family explicitly. The
+  # CLAUDE_FLEET_* names above are what claude-worker.sh reads internally,
+  # but downstream tooling (Colony's matchmaker, the codex CLI when it
+  # gets spawned later in the loop for nested ops, the worker-prompt
+  # boot step that calls `printenv CODEX_FLEET_*`) keys off the
+  # CODEX_FLEET_* names. Without these explicit prefixes the codex CLI's
+  # env scrubbing can wipe them between spawn and prompt execution,
+  # which surfaces as workers self-identifying as the generic 'codex'
+  # agent (2026-05-18 pt2 run, SI-16). The pane @panel label is the
+  # canonical agent name, so we set CODEX_FLEET_AGENT_NAME to the same
+  # value claude-worker.sh receives via CLAUDE_FLEET_AGENT_NAME.
+  env_str="$env_str CODEX_FLEET_AGENT_NAME='$agent' CODEX_FLEET_TIER='$TIER' CODEX_FLEET_SPECIALTY='$SPECIALTY'"
   # SI-9: forward per-pane worker cwd override into the wrapper env so
   # claude-worker.sh's resolve_worker_cwd picks it up before the main loop.
   if [ -n "${CODEX_FLEET_WORKER_CWD:-}" ]; then
