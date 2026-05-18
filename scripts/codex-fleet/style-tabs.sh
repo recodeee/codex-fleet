@@ -111,8 +111,9 @@ tx_set status-justify left
 # Canonical values match scripts/codex-fleet/fleet-tick.sh so the tab strip
 # reads as one continuous surface with the dashboards. Names mirror Apple's
 # UIKit system colors (UIColor.systemBlue, systemOrange, etc.).
-#   IOS_BG       = systemBackground (dark)         #000000
-#   IOS_BG2      = secondarySystemBackground       #1C1C1E
+#   IOS_BG       = systemBackground (dark)         #000000  (legacy strip bg)
+#   IOS_GLASS_BG = lifted-glass strip bg           #0A0A0C  (Design A 2026-05-18)
+#   IOS_BG2      = secondarySystemBackground       #1C1C1E  (glass chip fill)
 #   IOS_BG3      = tertiarySystemBackground        #2C2C2E
 #   IOS_BLUE     = systemBlue                      #007AFF  (active accent)
 #   IOS_ORANGE   = systemOrange                    #FF9500  (session badge)
@@ -122,18 +123,22 @@ tx_set status-justify left
 #   IOS_LABEL    = label                           #FFFFFF
 #   IOS_LABEL2   = secondaryLabel                  #AEAEB2
 #   IOS_LABEL3   = tertiaryLabel                   #8E8E93
-# Pill caps use ◖ / ◗ — same half-circle glyphs as fleet-tick.sh's
-# IOS_CHIP_LEFT/RIGHT, so caps render identically across surfaces.
-tx_set status-style "bg=#000000,fg=#8E8E93"
+#
+# Design A "Glass-pill dock" (2026-05-18): strip bg lifted from pure black
+# `#000000` to `#0A0A0C` so glass chips' `#1C1C1E` fill has a perceptible
+# vertical lift (gives the strip its "translucent dock" cue). Inactive tabs
+# get rounded `╭ ╮` caps (glass card); the active tab gets `▌ ▐` half-block
+# caps so it reads as a backlit dock chip lifted out of the strip surface.
+tx_set status-style "bg=#0A0A0C,fg=#8E8E93"
 
 # ── status-left: session badge — iOS-orange pill ─────────────────────────────
 tx_set status-left-length 40
-tx_set status-left "#[fg=#FF9500,bg=#000000]◖#[fg=#000000,bg=#FF9500,bold] ◆ #S #[fg=#FF9500,bg=#000000]◗ "
+tx_set status-left "#[fg=#FF9500,bg=#0A0A0C]◖#[fg=#000000,bg=#FF9500,bold] ◆ #S #[fg=#FF9500,bg=#0A0A0C]◗ "
 
 # ── status-right: live indicator + clock — iOS-green pill ────────────────────
 tx_set status-right-length 64
 tx_set status-right \
-  "#[fg=#34C759,bg=#000000]◖#[fg=#000000,bg=#34C759,bold] ● live #[fg=#34C759,bg=#000000]◗ #[fg=#AEAEB2,bg=#000000] #(date +%H:%M:%S)  "
+  "#[fg=#34C759,bg=#0A0A0C]◖#[fg=#000000,bg=#34C759,bold] ● live #[fg=#34C759,bg=#0A0A0C]◗ #[fg=#AEAEB2,bg=#0A0A0C] ◷ #(date +%H:%M:%S)  "
 
 # ── tab separator — empty so range=window|N markers butt up against each ────
 # Why empty: tmux emits `#{window-status-separator}` AFTER each tab's
@@ -151,10 +156,13 @@ tx_set status-right \
 # colours, the boundary stays legible without a literal space gap.
 tx_set window-status-separator ""
 
-# ── inactive tab — recessed pill, secondary label ────────────────────────────
-# iOS ghost-pill: faint secondarySystemBackground card, tertiaryLabel text.
+# ── inactive tab — glass card with rounded corners ───────────────────────────
+# Design A: rounded `╭ ╮` caps in the chip-fill color, painted against the
+# lifted strip bg (#0A0A0C). Reads as a glass card sitting on the dock surface.
+# The half-circle `◖◗` glyphs are still used for the session / live pills above
+# so the badge pills and the tab pills are visually distinguishable at a glance.
 tx_set window-status-format \
-  "#[fg=#1C1C1E,bg=#000000]◖#[fg=#8E8E93,bg=#1C1C1E]  #I  #[fg=#AEAEB2]#W  #[fg=#1C1C1E,bg=#000000]◗"
+  "#[fg=#1C1C1E,bg=#0A0A0C]╭#[fg=#8E8E93,bg=#1C1C1E] #I #[fg=#AEAEB2]#W #[fg=#1C1C1E,bg=#0A0A0C]╮"
 tx_set window-status-style "fg=#8E8E93,bg=#1C1C1E"
 
 # ── active tab — iOS-blue pill, white label, bold ────────────────────────────
@@ -172,8 +180,12 @@ tx_set window-status-style "fg=#8E8E93,bg=#1C1C1E"
 # tmux doesn't fire click handlers on the ✖ glyph either way (the chip was
 # decorative), so just drop the conditional. Active tab keeps the bright
 # iOS-blue pill, bold label, and ◖◗ half-circle caps; no per-tab close.
+# Design A: half-block `▌ ▐` caps in iOS-blue, painted against the lifted
+# strip bg (#0A0A0C). Reads as a backlit dock chip lifted out of the strip —
+# the slab caps contrast with inactive tabs' rounded glass caps so the focus
+# state is unmistakable at peripheral vision.
 tx_set window-status-current-format \
-  "#[fg=#007AFF,bg=#000000]◖#[fg=#FFFFFF,bg=#007AFF,bold]  #I  #W  #[fg=#007AFF,bg=#000000]◗"
+  "#[fg=#007AFF,bg=#0A0A0C]▌#[fg=#FFFFFF,bg=#007AFF,bold] #I #W #[fg=#007AFF,bg=#0A0A0C]▐"
 tx_set window-status-current-style "fg=#FFFFFF,bg=#007AFF,bold"
 
 # ── activity / bell highlights — iOS-orange / iOS-red ────────────────────────
@@ -471,24 +483,26 @@ if [[ -n "$_clip_cmd" ]]; then
   fi
 fi
 
-# Default UX: hide the tmux status bar entirely. The canonical navigation
-# surface is now the in-binary tab strip rendered by `rust/fleet-ui::tab_strip`
-# at the top of every ratatui dashboard (fleet-state / fleet-plan-tree /
-# fleet-waves / fleet-watcher / fleet-tui-poc). The orange tmux pill row was
-# redundant on top of that strip, so we collapse to a single navigation row.
-# All the formatting + mouse bindings above stay in place — they go dormant
-# while status is off and snap back the moment someone re-enables it via
-# `CODEX_FLEET_TMUX_STATUS=on`, with no need to re-run anything.
-if [[ "${CODEX_FLEET_TMUX_STATUS:-off}" != "on" ]]; then
+# Default UX: keep the tmux status bar visible so the iOS-style window nav
+# strip is the always-on header/footer for codex panes (plain codex CLI panes
+# don't render the in-binary fleet-ui tab_strip, so without this the operator
+# has no clickable nav surface). Opt out with `CODEX_FLEET_TMUX_STATUS=off`
+# when only the ratatui dashboards are in view.
+if [[ "${CODEX_FLEET_TMUX_STATUS:-on}" == "off" ]]; then
   tmux set-option -t "$SESSION" status off >/dev/null 2>&1 || true
+else
+  # Clear any per-session override so the global numeric `status N` (or `on`)
+  # set above actually renders. Without this, a stale `set -t SESSION status
+  # off` from a prior run shadows the global and the strip stays hidden.
+  tmux set-option -t "$SESSION" -u status >/dev/null 2>&1 || true
 fi
 
 # Immediate redraw.
 tmux refresh-client -S >/dev/null 2>&1 || true
 
-status_state="hidden — in-binary tab strip is the navigation surface"
-if [[ "${CODEX_FLEET_TMUX_STATUS:-off}" == "on" ]]; then
-  status_state="visible (CODEX_FLEET_TMUX_STATUS=on)"
+status_state="visible (default nav strip)"
+if [[ "${CODEX_FLEET_TMUX_STATUS:-on}" == "off" ]]; then
+  status_state="hidden (CODEX_FLEET_TMUX_STATUS=off)"
 fi
 if (( HEIGHT == 1 )); then
   echo "[style-tabs] applied iOS-palette tabs (height=1, mouse clicks WORK) to session=$SESSION  ·  tmux status: $status_state"
