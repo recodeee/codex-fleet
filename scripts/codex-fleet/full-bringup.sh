@@ -711,6 +711,7 @@ ticker_window() {
 tmux new-session -d -s "$TICKER_SESSION" -n ticker "bash $SCRIPT_DIR/fleet-tick-daemon.sh"
 tmux set-option -w -t "$TICKER_SESSION:ticker" remain-on-exit on 2>/dev/null || true
 ticker_window cap-swap "bash $SCRIPT_DIR/cap-swap-daemon.sh"
+ticker_window cap-budget "bash $SCRIPT_DIR/cap-budget-alerts.sh"
 # state-pump + review-detector — guard the spawn: their scripts may not
 # exist on every install (script extracted out of recodee inherited a
 # subset of daemons). Skip silently when missing so the window doesn't
