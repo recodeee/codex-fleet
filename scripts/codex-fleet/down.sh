@@ -45,6 +45,48 @@ else
   echo "[codex-fleet] no tmux session named $SESSION (already down)"
 fi
 
+# [SI-15] Clean up plan-into-writable_root symlinks created at bringup time.
+#
+# Reads the active-plan slug + the priority plan's metadata.writable_roots,
+# then unlinks every $W/openspec/plans/$slug symlink that exists. Idempotent:
+# missing files / missing slugs / missing repo are all non-fatal — the
+# whole block is wrapped in a tolerant `if`.
+REPO_ROOT_FOR_PLAN="${CODEX_FLEET_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+ACTIVE_PLAN_FILE="$REPO_ROOT_FOR_PLAN/.codex-fleet/active-plan"
+if [[ -f "$ACTIVE_PLAN_FILE" ]]; then
+  PLAN_SLUG_FOR_DOWN="$(tr -d '[:space:]' < "$ACTIVE_PLAN_FILE" 2>/dev/null || true)"
+  PLAN_JSON_FOR_DOWN="$REPO_ROOT_FOR_PLAN/openspec/plans/$PLAN_SLUG_FOR_DOWN/plan.json"
+  if [[ -n "$PLAN_SLUG_FOR_DOWN" && -f "$PLAN_JSON_FOR_DOWN" ]]; then
+    WRITABLE_ROOTS_LIST="$(PLAN_FILE="$PLAN_JSON_FOR_DOWN" python3 - <<'PY' 2>/dev/null || true
+import json, os
+p = os.environ.get("PLAN_FILE", "")
+try:
+    with open(p) as f:
+        data = json.load(f)
+except Exception:
+    data = {}
+roots = (data.get("metadata") or {}).get("writable_roots") or []
+for r in roots:
+    print(r)
+PY
+    )"
+    while IFS= read -r writable_root; do
+      [[ -z "$writable_root" ]] && continue
+      # Skip roots that ARE the repo (staging skipped them too).
+      case "$writable_root" in
+        "$REPO_ROOT_FOR_PLAN"|"$REPO_ROOT_FOR_PLAN"/*)
+          continue
+          ;;
+      esac
+      link_path="$writable_root/openspec/plans/$PLAN_SLUG_FOR_DOWN"
+      if [[ -L "$link_path" ]]; then
+        rm -f "$link_path"
+        echo "[codex-fleet] unlinked plan symlink: $link_path"
+      fi
+    done <<< "$WRITABLE_ROOTS_LIST"
+  fi
+fi
+
 if [[ "$PURGE" -eq 1 ]]; then
   if [[ "$WORK_ROOT" == "/" || "$WORK_ROOT" == "$HOME" ]]; then
     echo "fatal: refusing to purge work-root $WORK_ROOT (looks like a sensitive path)" >&2
