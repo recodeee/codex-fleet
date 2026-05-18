@@ -36,6 +36,13 @@ the start of every turn.
 1. `mcp__colony__hivemind_context` — confirm Colony reachable. If it fails,
    stop the loop and post a single shell echo "colony unreachable" then exit.
    Do not retry indefinitely.
+2. If `$CODEX_FLEET_HEADER_RENDER_PATH` is set, treat it as the path to the
+   `fleet-worker-header` binary (built from `rust/fleet-worker-header/`).
+   The fleet-tick daemon invokes it every ~30s as
+   `tmux set-option -t "$TMUX_PANE" pane-title "$($CODEX_FLEET_HEADER_RENDER_PATH --pane $TMUX_PANE)"`
+   to keep the pane title showing `▲ <agent> │ <tier> │ <task or — idle —> │ <age> │ cap: <state>`.
+   No worker action needed; this bullet exists so anyone reading the prompt
+   knows why the pane title differs from codex-CLI's default suggestions bar.
 
 ## Conductor bulletin (every loop iteration, BEFORE step 2)
 
