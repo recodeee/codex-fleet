@@ -1,0 +1,12 @@
+╭──────────────────────────────────────────────────────────────────────╮
+│  Create a plan?                                                      │
+│                                                                      │
+│  I can draft a multi-step plan before touching files. This is useful │
+│  for larger refactors where you want to review the intent first.     │
+│                                                                      │
+│  [enter] continue without plan mode                                  │
+│  shift + tab use Plan mode                                           │
+│  esc dismiss                                                         │
+╰──────────────────────────────────────────────────────────────────────╯
+
+> claim the next TE subtask and start working
