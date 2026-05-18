@@ -1,0 +1,60 @@
+[
+  {
+    "number": 4201,
+    "title": "feat(edge): [TE-2] src/edge module tree stubs",
+    "url": "https://github.com/recodeee/polymarket-cli/pull/4201",
+    "headRefName": "agent/codex/edge-te2-module-tree-2026-05-18",
+    "statusCheckRollup": [
+      {
+        "name": "cargo-fmt",
+        "conclusion": "SUCCESS",
+        "status": "COMPLETED"
+      },
+      {
+        "name": "cargo-clippy",
+        "conclusion": "FAILURE",
+        "status": "COMPLETED"
+      },
+      {
+        "name": "cargo-test",
+        "conclusion": "FAILURE",
+        "status": "COMPLETED"
+      }
+    ]
+  },
+  {
+    "number": 4202,
+    "title": "feat(edge): [SP-1] Strategy trait surface",
+    "url": "https://github.com/recodeee/polymarket-cli/pull/4202",
+    "headRefName": "agent/codex/edge-sp1-strategy-trait-2026-05-18",
+    "statusCheckRollup": [
+      {
+        "name": "cargo-fmt",
+        "conclusion": "SUCCESS",
+        "status": "COMPLETED"
+      },
+      {
+        "name": "cargo-test",
+        "conclusion": "SUCCESS",
+        "status": "COMPLETED"
+      }
+    ]
+  },
+  {
+    "number": 4203,
+    "title": "feat(fleet): [SI-3] full-bringup retry on auto_archive",
+    "url": "https://github.com/recodeee/codex-fleetui/pull/4203",
+    "headRefName": "agent/claude-supervisor/si-3-full-bringup-retry",
+    "statusCheckRollup": [
+      {
+        "name": "shellcheck",
+        "conclusion": "SUCCESS",
+        "status": "COMPLETED"
+      },
+      {
+        "name": "ci-smoke",
+        "status": "IN_PROGRESS"
+      }
+    ]
+  }
+]

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "plan_slug": "babysitter-test-plan",
+  "title": "pr-babysitter dry-run fixture plan",
+  "tasks": [
+    {
+      "subtask_index": 0,
+      "title": "[TE-2] src/edge module tree stubs",
+      "status": "claimed"
+    },
+    {
+      "subtask_index": 1,
+      "title": "[TE-1] protocol::MarketClass taxonomy enum",
+      "status": "completed"
+    },
+    {
+      "subtask_index": 2,
+      "title": "[SP-1] Strategy trait surface",
+      "status": "claimed"
+    }
+  ]
+}
