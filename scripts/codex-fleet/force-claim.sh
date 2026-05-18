@@ -57,6 +57,10 @@ set -eo pipefail
 # transparently rewrites the call to `tmux -L $SOCKET ...`. Default behavior
 # (env unset) is identical to the prior `tmux` binary call.
 source "$(dirname "${BASH_SOURCE[0]}")/lib/_tmux.sh"
+# SI-6: 5-second pre-claim staleness fence. dispatch() re-checks Colony
+# state via plan.json after a short sleep so two panes can't both be told
+# to claim the same sub-task while neither has actually issued the RPC.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/claim-fence.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Autodetect REPO from the clone location; env override wins.
@@ -391,6 +395,16 @@ for w, s, t in out:
 
 dispatch() {
   local pane_idx="$1" slug="$2" sub_idx="$3" title="$4"
+  # SI-6: pre-claim staleness fence. Re-read plan.json after a short sleep
+  # to make sure nobody else grabbed this sub-task while we were composing
+  # the dispatch batch. Non-zero exit = skip; the next force-claim tick will
+  # pick a new candidate. DRY mode still fences so dry-run output reflects
+  # actual race behaviour.
+  if ! claim_fence_check "$slug" "$sub_idx"; then
+    printf '[fence] skip %s/sub-%s -> pane=%s (status/race; see stderr)\n' \
+      "$slug" "$sub_idx" "$pane_idx"
+    return 0
+  fi
   # Prompt explicitly overrides any pinned-plan worker prompt — workers
   # that were told "PRIORITY plan = X" must switch to the named plan when
   # the watcher dispatches.

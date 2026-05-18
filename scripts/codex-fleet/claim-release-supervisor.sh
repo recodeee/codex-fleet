@@ -35,6 +35,13 @@
 
 set -eo pipefail
 
+# SI-6: pre-release staleness fence. Before we ask Colony to release a
+# claim we think is stranded, sleep a few seconds and re-check that the
+# claim is still held by that agent — guards against racing a worker that
+# completed mid-pass.
+# shellcheck source=lib/claim-fence.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/claim-fence.sh"
+
 SESSION="${CR_SUP_SESSION:-codex-fleet}"
 WINDOW="${CR_SUP_WINDOW:-overview}"
 INTERVAL="${CR_SUP_INTERVAL:-60}"
@@ -126,6 +133,13 @@ one_pass() {
       age=$((now - claimed_ts))
       if [ "$claimed_ts" -gt 0 ] && [ "$age" -lt "$MIN_IDLE_SEC" ]; then
         log "skip ${agent} ${slug}/sub-${sub} — claim age ${age}s < ${MIN_IDLE_SEC}s"
+        continue
+      fi
+      # SI-6: re-check after a short fence; skip release if the claim
+      # flipped (e.g. worker completed it between idle-detection and now).
+      if ! CODEX_FLEET_REPO_ROOT="$REPO_ROOT" \
+           claim_fence_check_held_by "$slug" "$sub" "$agent"; then
+        log "skip ${agent} ${slug}/sub-${sub} — claim state changed during fence"
         continue
       fi
       log "RELEASE ${agent} ${slug}/sub-${sub} age=${age}s title=${title}"
