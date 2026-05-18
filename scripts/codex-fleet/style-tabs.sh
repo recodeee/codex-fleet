@@ -484,10 +484,10 @@ if [[ -n "$_clip_cmd" ]]; then
 fi
 
 # Default UX: keep the tmux status bar visible so the iOS-style window nav
-# strip is the always-on header/footer for codex panes (plain codex CLI panes
-# don't render the in-binary fleet-ui tab_strip, so without this the operator
-# has no clickable nav surface). Opt out with `CODEX_FLEET_TMUX_STATUS=off`
-# when only the ratatui dashboards are in view.
+# strip is the always-on header/footer for codex panes. The old dashboard tab
+# strip was removed in plan codex-fleet-glass-menu-drop-tabstrip-2026-05-15;
+# plain codex CLI panes still need tmux chrome for clickable window nav.
+# Opt out with `CODEX_FLEET_TMUX_STATUS=off` for dashboard-only sessions.
 if [[ "${CODEX_FLEET_TMUX_STATUS:-on}" == "off" ]]; then
   tmux set-option -t "$SESSION" status off >/dev/null 2>&1 || true
 else
@@ -500,9 +500,9 @@ fi
 # Immediate redraw.
 tmux refresh-client -S >/dev/null 2>&1 || true
 
-status_state="visible (default nav strip)"
+status_state="visible (default tmux nav)"
 if [[ "${CODEX_FLEET_TMUX_STATUS:-on}" == "off" ]]; then
-  status_state="hidden (CODEX_FLEET_TMUX_STATUS=off)"
+  status_state="hidden (CODEX_FLEET_TMUX_STATUS=off; pane chrome only)"
 fi
 if (( HEIGHT == 1 )); then
   echo "[style-tabs] applied iOS-palette tabs (height=1, mouse clicks WORK) to session=$SESSION  ·  tmux status: $status_state"
