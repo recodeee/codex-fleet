@@ -35,6 +35,15 @@
 #   RATE_LIMIT_DELAY_SEC        429/quota backoff (default 300)
 #   STOP_FILE                   touch this path to break the loop
 #                               (default: $LOG_DIR/claude-worker-<id>.stop)
+#   CODEX_FLEET_WORKER_MODE     SI-14: when set to 'standby', the loop
+#                               short-circuits BEFORE invoking the Claude
+#                               wake-prompt (i.e. no task_ready_for_agent
+#                               poll, no Colony calls). Operator flips with
+#                               `tmux setenv -t <pane> CODEX_FLEET_WORKER_MODE
+#                               standby`. Clearing or setting to 'active'
+#                               resumes the normal loop on the next tick.
+#   STANDBY_SLEEP_SEC           seconds between standby re-checks
+#                               (default 30; re-read on each iteration)
 
 set -u
 
@@ -184,22 +193,71 @@ run_once() {
   return 0
 }
 
-while true; do
+# SI-14: hard-standby. `tmux setenv -t <pane> CODEX_FLEET_WORKER_MODE standby`
+# puts the pane to sleep without relying on natural-language prompts that the
+# Claude session can ignore (observed 2026-05-18 — a pane ignored a polite
+# STANDBY prompt and grabbed an unrelated plan's task). Check at the top of
+# every loop iteration so the operator can flip the mode mid-run and have it
+# take effect on the next 30s tick. MODE=standby short-circuits BEFORE any
+# Colony poll (run_once → claude wake-prompt → task_ready_for_agent). MODE
+# unset/empty or "active" runs the normal loop.
+worker_standby_active() {
+  [ "${CODEX_FLEET_WORKER_MODE:-}" = "standby" ]
+}
+
+# Body of the worker loop, extracted so test/run-worker-standby.sh can
+# exercise a single iteration in a subshell with mocks.
+#   exit 0    iteration completed normally (caller sleeps RESTART_DELAY_SEC)
+#   exit 42   rate-limit detected (caller sleeps RATE_LIMIT_DELAY_SEC)
+#   exit 100  stop file present (caller breaks the loop)
+#   exit 101  standby mode active (caller sleeps the standby tick, 30s)
+worker_loop_iter() {
   if [ -f "$STOP_FILE" ]; then
     printf '[claude-worker] stop file present (%s); exiting\n' "$STOP_FILE" | tee -a "$LOG_FILE"
-    exit 0
+    return 100
+  fi
+
+  if worker_standby_active; then
+    printf '[claude-worker] standby mode active (CODEX_FLEET_WORKER_MODE=standby); skipping Colony poll\n' \
+      | tee -a "$LOG_FILE"
+    return 101
   fi
 
   run_once
+  return $?
+}
+
+# When sourced by test/run-worker-standby.sh we want worker_loop_iter
+# defined without dropping into the live while-loop. The test sets
+# CLAUDE_WORKER_LOOP_SOURCE_ONLY=1 before sourcing.
+if [ "${CLAUDE_WORKER_LOOP_SOURCE_ONLY:-0}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
+# Standby tick: how long the worker sleeps between MODE re-checks when in
+# standby. Default 30s, matching the SI-14 acceptance criterion.
+STANDBY_SLEEP_SEC="${STANDBY_SLEEP_SEC:-30}"
+
+while true; do
+  worker_loop_iter
   rc=$?
 
-  if [ "$rc" -eq 42 ]; then
-    printf '[claude-worker] rate-limit detected; sleeping %ss\n' "$RATE_LIMIT_DELAY_SEC" \
-      | tee -a "$LOG_FILE"
-    sleep "$RATE_LIMIT_DELAY_SEC"
-  else
-    printf '[claude-worker] exit rc=%s; relaunch in %ss\n' "$rc" "$RESTART_DELAY_SEC" \
-      | tee -a "$LOG_FILE"
-    sleep "$RESTART_DELAY_SEC"
-  fi
+  case "$rc" in
+    100)
+      exit 0
+      ;;
+    101)
+      sleep "$STANDBY_SLEEP_SEC"
+      ;;
+    42)
+      printf '[claude-worker] rate-limit detected; sleeping %ss\n' "$RATE_LIMIT_DELAY_SEC" \
+        | tee -a "$LOG_FILE"
+      sleep "$RATE_LIMIT_DELAY_SEC"
+      ;;
+    *)
+      printf '[claude-worker] exit rc=%s; relaunch in %ss\n' "$rc" "$RESTART_DELAY_SEC" \
+        | tee -a "$LOG_FILE"
+      sleep "$RESTART_DELAY_SEC"
+      ;;
+  esac
 done

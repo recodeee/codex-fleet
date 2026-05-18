@@ -31,6 +31,23 @@ the start of every turn.
 - One Colony observation per real state change. Nothing else.
 - Drop filler tokens (`I will`, `Now`, `Let me`). Imperative + result.
 
+## Boot (very first thing)
+
+<!--
+  SI-17: codex CLI scrubs env vars between spawn and prompt execution, so
+  workers landed here with empty CODEX_FLEET_SPECIALTY / TIER / AGENT_NAME /
+  WORKER_CWD even though the bringup staged them correctly (see SI-11 set
+  the specialty and SI-13 confirmed the scrub). Sourcing the per-account env
+  staging file at the very top of the prompt restores the family so the
+  tier+specialty gate below and the worker-cwd resolver both see live values.
+  Idempotent: missing file → silent no-op; we run before any tool call.
+-->
+
+```bash
+source /tmp/codex-fleet/${CODEX_FLEET_AGENT_NAME:-unknown}/env 2>/dev/null || true
+export CODEX_FLEET_SPECIALTY CODEX_FLEET_TIER CODEX_FLEET_AGENT_NAME CODEX_FLEET_WORKER_CWD
+```
+
 ## Boot (once)
 
 1. `mcp__colony__hivemind_context` — confirm Colony reachable. If it fails,
