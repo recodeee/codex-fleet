@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "plan_slug": "missing-writable-root-2026-05-18",
+  "title": "missing writable_root fixture",
+  "problem": "metadata.writable_roots includes a path that does not exist on disk. The validator must detect and exit 3 (fatal). Used by run-plan-validator-cases.sh to assert rule (d) which checks every writable_root for existence and writability.",
+  "acceptance_criteria": [
+    "Every sub-task lands as an independent PR with verifiable evidence in the PR body and CI gate passes."
+  ],
+  "metadata": {
+    "writable_roots": ["/this/path/should/never/exist/codex-fleet-validator-fixture"]
+  },
+  "tasks": [
+    {
+      "subtask_index": 0,
+      "title": "alpha",
+      "description": "Alpha sub-task description padded to satisfy the >=200 char rule. The writable_roots entry above points at a path that should never exist on a real system, so the validator's rule (d) must flag it as a fatal error during pre-publish.",
+      "file_scope": ["scripts/alpha.sh"],
+      "depends_on": []
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "plan_slug": "foreign-fixture-2026-05-18",
+  "title": "foreign writable_roots fixture",
+  "problem": "Used by run-routing-filter.sh to assert compute_specialty echoes the plan_slug when writable_roots is outside the codex-fleet repo family.",
+  "acceptance_criteria": [
+    "Validator and routing-filter agree the writable_roots are foreign."
+  ],
+  "metadata": {
+    "writable_roots": ["/tmp/foreign"]
+  },
+  "tasks": []
+}

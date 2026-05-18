@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "plan_slug": "dup-file-scope-2026-05-18",
+  "title": "duplicate file_scope fixture",
+  "problem": "Two sibling subtasks share the same file_scope path. The validator must flag this as a fatal error (overlap detection rule b). Used by run-plan-validator-cases.sh to assert exit code 3.",
+  "acceptance_criteria": [
+    "Every sub-task lands as an independent PR with verifiable evidence in the PR body and CI gate passes."
+  ],
+  "metadata": {
+    "writable_roots": ["/tmp"]
+  },
+  "tasks": [
+    {
+      "subtask_index": 0,
+      "title": "alpha",
+      "description": "Alpha sub-task description padded to satisfy the >=200 char rule. The fixture deliberately overlaps file_scope with the beta sub-task below to exercise the validator's pairwise overlap detection logic and trigger a fatal exit.",
+      "file_scope": ["scripts/shared.sh"],
+      "depends_on": []
+    },
+    {
+      "subtask_index": 1,
+      "title": "beta",
+      "description": "Beta sub-task description padded to satisfy the >=200 char rule. The fixture deliberately shares its file_scope with alpha above so the validator emits a file_scope overlap error and exits 3 as documented in plan-validator.sh.",
+      "file_scope": ["scripts/shared.sh"],
+      "depends_on": []
+    }
+  ]
+}

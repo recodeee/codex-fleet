@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "plan_slug": "fleet-family-fixture-2026-05-18",
+  "title": "fleet-family writable_roots fixture",
+  "problem": "Used by run-routing-filter.sh to assert compute_specialty echoes empty (generalist) when writable_roots includes a fleet-family path.",
+  "acceptance_criteria": [
+    "Routing-filter recognises codex-fleetui as a fleet-family root."
+  ],
+  "metadata": {
+    "writable_roots": ["/home/deadpool/Documents/codex-fleetui"]
+  },
+  "tasks": []
+}
