@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "plan_slug": "fleet-dispatch-fixes-2026-05-18",
+  "title": "Fix codex-fleetui dispatch path: dead panes, cap cache, auto-wake, plan-watcher waves, ready signal, Codex auto-submit",
+  "problem": "Real-fleet telemetry from the 2026-05-18 marketing-content-waves bringup (recodee repo) surfaced six concrete dispatch-path defects that block workers from claiming Colony tasks even when the fleet is physically up. F1: stale dead panes linger silently. F2: cap-probe cache outlived quota recovery. F3: wake-prompt window stays blank — workers idle at default Codex placeholders. F4: plan-watcher re-validates without --allow-waves and silently falls back to other plans when our priority plan has depends_on. F5: force-claim send-keys hits 'not in a mode' on non-idle panes and drops dispatch with no retry. F6: even when send-keys lands, Codex's auto-submit doesn't fire — context drops but Colony never sees a claim. Net: a healthy-looking tmux fleet performs zero work.",
+  "acceptance_criteria": [
+    "show-fleet.sh and rust overview surface dead_panes count; alert fires when any pane has dead==1 for >60s",
+    "cap-probe cache invalidates after 60s default; invalidates immediately on bringup-failure marker",
+    "CODEX_FLEET_AUTO_WAKE=1 default fires wake-prompt.sh once at end of full-bringup.sh, before DONE banner; can be disabled with =0",
+    "plan-watcher.sh inherits --allow-waves when invoking lib/plan-validator.sh; operator override via CODEX_FLEET_PLAN_VALIDATOR_FLAGS env",
+    "force-claim.sh skips panes that fail input-ready check; retries on next tick with backoff instead of emitting 'not in a mode' silently",
+    "Smoke test scripts/codex-fleet/test/codex-auto-submit-test.sh asserts a 1-pane fleet on a no-op plan reaches at least one Colony claim within 90s; current behavior would fail (zero claims)",
+    "Integration test: full-bringup.sh --plan-slug fleet-dispatch-fixes-2026-05-18 --n 4 --auto-fleet-id --no-cap-cache against THIS plan results in >=4 Colony claims within 90s of DONE banner",
+    "openspec validate agent-claude-cfui-dispatch-improvements-zzz-2026-05-1-2026-05-18-14-03 --type change --strict passes; openspec validate --specs passes",
+    "Each subtask appends one example JSONL entry to docs/fleet-telemetry-cases.md documenting the original failure mode + the new test assertion"
+  ],
+  "roles": ["planner", "architect", "critic", "executor", "writer", "verifier"],
+  "tasks": [
+    {
+      "subtask_index": 0,
+      "title": "F1 — Surface dead panes in show-fleet.sh + rust overview",
+      "description": "Read tmux #{pane_dead} via list-panes -F. Emit dead_panes count in scripts/codex-fleet/show-fleet.sh JSON output. Add alert when any pane has dead==1 for >60s (read pane_dead_status_changed timestamp from /tmp/claude-viz/fleet-state.json if present, else first-detection time). Add a one-line example to docs/fleet-telemetry-cases.md.",
+      "file_scope": [
+        "scripts/codex-fleet/show-fleet.sh",
+        "docs/fleet-telemetry-cases.md"
+      ],
+      "depends_on": [],
+      "spec_row_id": null,
+      "capability_hint": "doc_work",
+      "status": "available"
+    },
+    {
+      "subtask_index": 1,
+      "title": "F2 — Cap-probe cache TTL hardening",
+      "description": "Lower cap-probe cache TTL default to 60 seconds (current is much higher — first run found 5/6, fresh probe 5min later found 8/8). Invalidate cache when /tmp/claude-viz/bringup-failure.marker exists. Add a CODEX_FLEET_CAP_CACHE_TTL env override. Touch ONLY cap-probe.sh; document the new env in scripts/codex-fleet/README.md or equivalent.",
+      "file_scope": [
+        "scripts/codex-fleet/cap-probe.sh",
+        "scripts/codex-fleet/cap-probe-cache.sh"
+      ],
+      "depends_on": [],
+      "spec_row_id": null,
+      "capability_hint": "test_work",
+      "status": "available"
+    },
+    {
+      "subtask_index": 2,
+      "title": "F3 — Auto-wake workers at end of full-bringup",
+      "description": "Add CODEX_FLEET_AUTO_WAKE env (default 1). When set, run wake-prompt.sh ONCE at the very end of full-bringup.sh, after the iOS chrome verify and before the DONE banner. Skip when CODEX_FLEET_AUTO_WAKE=0. Verify wake-prompt.sh tolerates being called outside its usual ticker context (idempotent). Touch ONLY full-bringup.sh.",
+      "file_scope": [
+        "scripts/codex-fleet/full-bringup.sh"
+      ],
+      "depends_on": [],
+      "spec_row_id": null,
+      "capability_hint": "api_work",
+      "status": "available"
+    },
+    {
+      "subtask_index": 3,
+      "title": "F4 — plan-watcher inherits --allow-waves",
+      "description": "In scripts/codex-fleet/plan-watcher.sh:run_plan_validator(), pass --allow-waves to the validator invocation (around line 187-189 where we see summary=`\"$validator\" \"$plan_json\" 2>/dev/null`). Add CODEX_FLEET_PLAN_VALIDATOR_FLAGS env override for operators who need to inject other flags. Touch ONLY plan-watcher.sh.",
+      "file_scope": [
+        "scripts/codex-fleet/plan-watcher.sh"
+      ],
+      "depends_on": [],
+      "spec_row_id": null,
+      "capability_hint": "frontend_work",
+      "status": "available"
+    },
+    {
+      "subtask_index": 4,
+      "title": "F5 — Worker-ready signal + retry in force-claim",
+      "description": "Before send-keys, force-claim.sh checks pane input-mode via `tmux display-message -p -t <pane> '#{pane_in_mode}'` AND a Codex-input-state heuristic (capture last line, look for `›` prompt marker). If not ready, log 'pane <id> not-ready; deferring' and skip — DO NOT emit 'not in a mode' nor consume the Colony claim. The deferred subtask returns to ready state on the next tick. Touch ONLY force-claim.sh.",
+      "file_scope": [
+        "scripts/codex-fleet/force-claim.sh"
+      ],
+      "depends_on": [],
+      "spec_row_id": null,
+      "capability_hint": "frontend_work",
+      "status": "available"
+    },
+    {
+      "subtask_index": 5,
+      "title": "F6 — Codex auto-submit smoke test + fix",
+      "description": "Write scripts/codex-fleet/test/codex-auto-submit-test.sh: spin up a 1-pane fleet against a no-op plan, send-keys a wake prompt, assert Colony shows >=1 claim within 90s. The current dispatch path will fail this test (zero claims). Then fix: experiment with `tmux send-keys ... Enter Enter`, `paste-buffer` + `paste-buffer -p`, or `Tab Enter` until the smoke test passes. Update force-claim.sh OR worker-prompt.md (whichever owns the submit step) with the working pattern. Document in docs/fleet-telemetry-cases.md.",
+      "file_scope": [
+        "scripts/codex-fleet/test/codex-auto-submit-test.sh"
+      ],
+      "depends_on": [],
+      "spec_row_id": null,
+      "capability_hint": "test_work",
+      "status": "available"
+    }
+  ]
+}
