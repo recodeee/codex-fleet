@@ -1,0 +1,12 @@
+# architect
+
+Role workspace for `architect`.
+
+Default artifacts:
+- `.openspec.yaml`
+- `prompt.md`
+- `proposal.md`
+- `tasks.md`
+- `specs/<role>/spec.md`
+
+Use this folder for role notes, artifacts, and status updates.
