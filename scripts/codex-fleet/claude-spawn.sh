@@ -263,6 +263,11 @@ build_pane_cmd() {
   local env_str
   env_str="CLAUDE_FLEET_AGENT_NAME='$agent' CLAUDE_FLEET_ACCOUNT_LABEL='$label' CLAUDE_FLEET_TIER='$TIER' CLAUDE_FLEET_SPECIALTY='$SPECIALTY' CLAUDE_FLEET_MODEL='$MODEL'"
   env_str="$env_str CODEX_HOME='$CODEX_HOME'"
+  # SI-9: forward per-pane worker cwd override into the wrapper env so
+  # claude-worker.sh's resolve_worker_cwd picks it up before the main loop.
+  if [ -n "${CODEX_FLEET_WORKER_CWD:-}" ]; then
+    env_str="$env_str CODEX_FLEET_WORKER_CWD='$CODEX_FLEET_WORKER_CWD'"
+  fi
   if [ -n "$ACCOUNT_EMAIL" ]; then
     env_str="$env_str ACCOUNT_EMAIL='$ACCOUNT_EMAIL'"
   fi

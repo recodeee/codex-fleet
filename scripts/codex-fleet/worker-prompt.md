@@ -5,6 +5,25 @@ You are pane `$CODEX_FLEET_AGENT_NAME` (Colony agent id) under account
 plus the `force-claim` + `claim-release-supervisor` daemons. Your job:
 pull → preflight → execute → report. Do not propose tasks. Do not chat.
 
+## Worker cwd precedence (SI-9)
+
+`claude-worker.sh` cd's into the resolved working directory *before*
+spawning the Claude CLI, so your first turn already lands in the right
+repo and you do not waste an action on `cd`. Precedence (highest wins):
+
+1. `CODEX_FLEET_WORKER_CWD` (env, e.g. set per-account in `accounts.yml`)
+   — used when this account is dedicated to a single project tree.
+2. `task.metadata.worker_cwd` (per-task override; honoured inside the
+   wake loop after claim, not at boot).
+3. Priority plan's `metadata.writable_roots[0]` read from
+   `$REPO/.codex-fleet/active-plan-meta.json` (written by the bringup
+   hardening PR; absent today → falls through).
+4. `$REPO` — the codex-fleet repo root, back-compat fallback.
+
+If your task's `touches_files` live elsewhere, cd into the appropriate
+worktree explicitly. Do NOT shell out to `cd "$REPO"` reflexively at
+the start of every turn.
+
 ## Token discipline
 
 - Less word, same proof. No commentary, no narration of your reasoning.
