@@ -293,6 +293,126 @@ The fleet panes call `mcp__colony__task_ready_for_agent` on a 60s loop
 and auto-claim the next ready sub-task. You do NOT push directly to a
 specific pane.
 
+## Continuous supervision (sidetask — always on while fleet is up)
+
+When the fleet is up, you are not idle between user messages — you are
+the **supervisor on duty**. The pull model means workers won't ask you
+for help; you have to look. Run the supervisor loop below whenever you
+have free turns (between tool calls the user asked for, after every
+status check, on every notification).
+
+### The supervisor loop (one pass = ~10 seconds of work)
+
+1. **Snapshot.** Call `fleet-status.sh` (SI-4) once. If `fleet-mcp` (SI-1)
+   is registered, prefer `fleet_status` MCP tool — it's the same JSON
+   but doesn't shell out. Parse the result.
+
+2. **Classify every worker.** From the snapshot's `workers[]`:
+   - `working` with a `claimed_task` → healthy; note the age
+   - `working` with no `claimed_task` for > 3 minutes → probably stuck
+     on the worker prompt or chasing a bad task; capture pane + read
+   - `waiting-on-prompt` → SI-2 stall-watcher should dismiss within
+     5s; if it's still there after 30s, SI-2 has a fixture gap — note
+     the prompt text and add it as a fixture
+   - `errored` → check the BLOCKED reason; if it's `preflight=writable-root`
+     the worker got routed to a foreign plan (specialty filter missed) —
+     `colony plan archive` the stale plan OR send an explicit OVERRIDE
+     prompt with `task_plan_claim_subtask` pinned to the priority plan
+   - `idle` → wait one cycle; if still idle after two cycles AND there
+     are `available` subtasks for the priority plan, send an explicit
+     claim prompt
+
+3. **Read the daemon logs.** Tail these and look for new entries since
+   last pass:
+   - `/tmp/claude-viz/stall-watcher.log` — SI-2 dismissals (expected)
+   - `/tmp/claude-viz/cap-budget-alerts.log` — SI-10 transitions (act
+     on `breach`)
+   - `/tmp/claude-viz/cap-swap.log` — 429 hand-offs
+   - `/tmp/claude-viz/conductor-broadcasts.jsonl` — any operator
+     messages routed through the conductor
+   - `/tmp/claude-viz/cap-budget.alert` — flag file from SI-10; if
+     present, a majority of accounts are 429
+
+4. **Read PR state for the active plan.** `gh pr list --search 'agent/
+   in:branch' --json number,headRefName,statusCheckRollup,state`.
+   For each open PR:
+   - CI passing + mergeable → SI-8 pr-babysitter (or the repo's own
+     auto-merge workflow) handles it; verify it's progressing
+   - CI failing → SI-8 should hand off; if it didn't (e.g. the PR was
+     opened before SI-8 was wired), open a Colony note manually and
+     release the claim
+   - Mergeable but stalled (no auto-merge enabled on the repo) → flag
+     it to the user with the PR URL and a one-line summary
+
+5. **Brainstorm improvements as you go.** Every time you do something
+   manually that the daemons *should* have done, that's a future SI-N
+   proposal. Keep a running list in the active conversation's tasks
+   (`TaskCreate` with subject prefixed `[supervisor-idea]`) — at the
+   end of the run, propose them as a new
+   `openspec/plans/supervisor-improvements-<date>/plan.json` and
+   either implement directly (via parallel Claude Code sub-agents,
+   per the 2026-05-18 precedent) or hand the plan to the next codex
+   fleet bringup.
+
+### What "managing agents" actually means
+
+The fleet's contract is pull-based: workers pick tasks. As supervisor
+you do the things workers cannot do for themselves:
+
+- **Routing override.** When `task_ready_for_agent` keeps returning
+  foreign-plan tasks that fail writable-root preflight, the workers
+  loop on BLOCKED notes forever. Detect the loop (≥2 BLOCKED notes
+  for the same `task_id` from the same agent within 5 minutes) and:
+  (a) archive the offending plan if it's truly stale, OR (b) send an
+  explicit `task_plan_claim_subtask` prompt pinning the worker to a
+  subtask of the priority plan.
+- **Stuck-worker rescue.** A worker stuck on an interactive prompt
+  that SI-2 doesn't know about is a new fixture. Send the right key
+  sequence manually, then capture the prompt as a stall-watcher
+  fixture under `scripts/codex-fleet/test/stall-fixtures/`.
+- **Cross-claim deconfliction.** If two workers somehow claim the
+  same subtask despite SI-6 claim-fence (rare race), one of them
+  should `task_hand_off` and let the other finish.
+- **Plan exhaustion.** When the priority plan has 0 `available`
+  subtasks and workers are idle, either publish the next plan or
+  tear down. Idle workers spinning task_ready_for_agent at 60s
+  intervals burn quota for nothing.
+- **Capacity coordination.** SI-10 surfaces the >50% 429 alert; you
+  decide whether to scale workers down (`--n 2` next bringup), wait
+  for cooldown, or run only the cheapest tier accounts until reset.
+
+### What never to do as supervisor
+
+- **Never silently kill a worker mid-claim** unless you've reassigned
+  the task. Use `task_hand_off` then send an interrupt, not the other
+  way around.
+- **Never commit to `main` directly to "fix" what a worker is doing**
+  — that breaks the audit trail. Open an `agent/<owner>/` branch
+  yourself, push, PR.
+- **Never edit a worker's CODEX_HOME or auth.json** while the fleet
+  is up — kill the fleet first.
+- **Never delete an `openspec/plans/<slug>/plan.json` while workers
+  are claimed against it.** Archive the plan instead
+  (`colony plan close <slug>` once subtasks are completed-or-released).
+
+### Cadence
+
+- **Every operator turn.** One supervisor-loop pass between handling
+  the user's request.
+- **Every notification.** When a sub-agent or background command
+  completes, one pass.
+- **Idle window.** If the user is silent for > 5 minutes and the
+  fleet is up, run a pass + report any new findings in a single
+  terse message. Do not spam.
+
+### Carrying state across turns
+
+Use the `memory/` lane (file-based) for durable supervisor knowledge:
+new fixtures for SI-2, new prompts the workers ask, new failure modes
+in CI, account-tier discoveries. Each gets a small memory file and a
+`MEMORY.md` index entry. Do **not** stuff this into Colony — Colony
+is for tasks, not supervisor notes.
+
 ## Monitoring
 
 ### Quick status
