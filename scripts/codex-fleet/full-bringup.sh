@@ -160,6 +160,12 @@ fi
 [ -f "openspec/plans/$PLAN_SLUG/plan.json" ] || die "plan workspace missing: openspec/plans/$PLAN_SLUG/plan.json"
 log "priority plan: $PLAN_SLUG"
 
+# Persist the priority slug so daemons (pr-babysitter, auto-reviewer,
+# plan-watcher, wake-prompt-templater) + down.sh's symlink cleanup can read
+# it without re-running the newest-plan picker. Single-line file, no newline.
+mkdir -p "$REPO/.codex-fleet"
+printf '%s' "$PLAN_SLUG" > "$REPO/.codex-fleet/active-plan"
+
 # 2b. Build --add-dir flags from plan metadata.writable_roots (schema:
 # scripts/codex-fleet/lib/plan-meta.md). Falls back to the recodee +
 # codex-fleet pair when the plan declares nothing.
@@ -235,6 +241,43 @@ for path in $(printf '%s\n' "$ADD_DIR_FLAGS" | awk '{for(i=1;i<=NF;i++) if($i=="
   add_count=$((add_count + 1))
 done
 log "writable roots ok: $add_count root(s)"
+
+# 2e. [SI-15] Stage the priority plan into every writable_root.
+#
+# When a worker pane cd's into a writable_root W (e.g. polymarket-cli),
+# `colony plan status <slug>` resolves the plan workspace relative to W's
+# cwd — i.e. `W/openspec/plans/<slug>/plan.json`. Without staging, that
+# file does not exist outside the codex-fleet repo and the call errors
+# with ENOENT (observed 2026-05-18 during the pt2 trading-edge run).
+#
+# Fix: for each W in metadata.writable_roots that is OUTSIDE this repo,
+# `ln -sfn $REPO/openspec/plans/<slug> $W/openspec/plans/<slug>` so the
+# plan workspace resolves from any cwd. Symlinks are idempotent (-sfn
+# replaces an existing link without erroring) and torn down by down.sh.
+#
+# Roots inside REPO are skipped silently — the plan already lives there.
+stage_plan_symlink() {
+  local writable_root="$1" slug="$2" repo="$3"
+  # Skip when the writable_root is the repo itself or any subpath thereof —
+  # the plan workspace already resolves directly at $repo/openspec/plans/<slug>.
+  case "$writable_root" in
+    "$repo"|"$repo"/*)
+      return 0
+      ;;
+  esac
+  local target="$repo/openspec/plans/$slug"
+  local link_parent="$writable_root/openspec/plans"
+  local link_path="$link_parent/$slug"
+  mkdir -p "$link_parent" 2>/dev/null || return 1
+  ln -sfn "$target" "$link_path" || return 1
+  log "symlinked plan into writable root: $link_path"
+  return 0
+}
+
+for path in $(printf '%s\n' "$ADD_DIR_FLAGS" | awk '{for(i=1;i<=NF;i++) if($i=="--add-dir"){print $(i+1)}}'); do
+  stage_plan_symlink "$path" "$PLAN_SLUG" "$REPO" || \
+    warn "failed to stage plan symlink at $path/openspec/plans/$PLAN_SLUG"
+done
 
 # 3. Pre-spawn git cleanup (prevents 'incorrect old value provided' inside agent-branch-start.sh)
 log "pruning stale remote refs"
@@ -899,6 +942,14 @@ ticker_window claim-release "CR_SUP_SESSION=$SESSION CR_SUP_WINDOW=overview bash
 # plan would sit untouched until an operator manually triggers each pane.
 # Cooldown prevents re-prompting the same worker on the same plan.
 ticker_window plan-watcher "CODEX_FLEET_SESSION=$SESSION CODEX_FLEET_REPO_ROOT=$REPO bash $SCRIPT_DIR/plan-watcher.sh --loop --interval=30"
+
+# wake-prompt: every 30s, refreshes /tmp/codex-fleet-wake-prompt.md with
+# the LIVE next-available subtask from the priority plan. Without this,
+# workers re-read a stale snapshot of the wake prompt that bringup captured
+# at fleet start — referencing tasks that have long since been merged
+# (observed 2026-05-18: every worker still pointed at TE-2 hours after
+# TE-2 had landed). See scripts/codex-fleet/wake-prompt-templater.sh.
+ticker_window wake-prompt "bash $SCRIPT_DIR/wake-prompt-templater.sh"
 
 # auto-reviewer: every 5m, reviews merged PRs attached to completed plan
 # sub-tasks. Slow cadence keeps Claude call cost bounded while still catching
