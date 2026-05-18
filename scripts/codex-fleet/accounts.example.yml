@@ -25,6 +25,11 @@
 #   specialty       [list of plan-slug prefixes] (default [] = generalist)
 #                   Pane prefers tasks whose `plan_slug` starts with one of
 #                   these prefixes. Empty list = accept all plans.
+#   worker_cwd      (optional, SI-9) absolute path to cd into before the
+#                   worker REPL starts. Exported as CODEX_FLEET_WORKER_CWD.
+#                   Use when this account is dedicated to a project tree
+#                   outside the codex-fleet repo. Precedence:
+#                     worker_cwd > active-plan-meta writable_roots[0] > $REPO
 
 accounts:
   - id: research
@@ -40,6 +45,9 @@ accounts:
     rate_limit_tier: standard
     tier: medium
     specialty: ["codex-fleet", "recodee"]
+    # Pin this pane to the polymarket-cli tree so its first action is not
+    # `cd /home/deadpool/Documents/polymarket-cli` every wake. See SI-9.
+    worker_cwd: /home/deadpool/Documents/polymarket-cli
 
   - id: review
     email: admin@mite.hu

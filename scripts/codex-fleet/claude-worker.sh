@@ -38,6 +38,45 @@
 
 set -u
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="${CODEX_FLEET_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+
+# Resolve the worker's initial cwd by precedence:
+#   1. CODEX_FLEET_WORKER_CWD from env (e.g. set in accounts.yml per-pane)
+#   2. task.metadata.worker_cwd  (only after a task is claimed — the wake
+#      prompt is responsible for cd'ing there; out of scope for this fn)
+#   3. priority plan's metadata.writable_roots[0] read from
+#      $REPO/.codex-fleet/active-plan-meta.json if present
+#   4. fallback: $REPO (back-compat with pre-SI-9 behavior)
+#
+# TODO(SI-3/SI-5/SI-11): the bringup hardening PR is the right place to
+# write $REPO/.codex-fleet/active-plan-meta.json from the priority plan's
+# metadata. Until then case (3) is a no-op for live fleets and we fall
+# through to (4) — which keeps things working exactly as before.
+resolve_worker_cwd() {
+  if [ -n "${CODEX_FLEET_WORKER_CWD:-}" ]; then
+    if [ -d "$CODEX_FLEET_WORKER_CWD" ] && [ -w "$CODEX_FLEET_WORKER_CWD" ]; then
+      echo "$CODEX_FLEET_WORKER_CWD"; return
+    fi
+  fi
+  local meta_file="$REPO/.codex-fleet/active-plan-meta.json"
+  if [ -f "$meta_file" ] && command -v jq >/dev/null 2>&1; then
+    local wr
+    wr=$(jq -r '.metadata.writable_roots[0] // empty' "$meta_file" 2>/dev/null)
+    if [ -n "$wr" ] && [ -d "$wr" ] && [ -w "$wr" ]; then
+      echo "$wr"; return
+    fi
+  fi
+  echo "$REPO"
+}
+
+# When sourced by test/run-worker-cwd.sh we want resolve_worker_cwd
+# defined but the rest of the script (env validation, banner, main loop)
+# skipped. The test sets CLAUDE_WORKER_SOURCE_ONLY=1 before sourcing.
+if [ "${CLAUDE_WORKER_SOURCE_ONLY:-0}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 AGENT="${CLAUDE_FLEET_AGENT_NAME:-}"
 if [ -z "$AGENT" ]; then
   echo "[claude-worker] fatal: CLAUDE_FLEET_AGENT_NAME unset" >&2
@@ -56,12 +95,17 @@ mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/claude-worker-$AGENT.log"
 STOP_FILE="${STOP_FILE:-$LOG_DIR/claude-worker-$AGENT.stop}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WAKE="$SCRIPT_DIR/claude-wake-prompt.md"
 if [ ! -f "$WAKE" ]; then
   echo "[claude-worker] fatal: wake-prompt missing at $WAKE" >&2
   exit 2
 fi
+
+worker_cwd="$(resolve_worker_cwd)"
+cd "$worker_cwd" || {
+  echo "[claude-worker] fatal: cannot cd to resolved worker cwd: $worker_cwd" >&2
+  exit 2
+}
 
 ADD_DIR_FLAGS=(
   --add-dir "/home/deadpool/Documents/recodee"
@@ -97,6 +141,8 @@ fi
     "$AGENT" "$LABEL" "$TIER" "$SPECIALTY" "$MODEL"
   printf 'wake=%s log=%s\n' "$WAKE" "$LOG_FILE"
   printf 'stop=%s (touch this to break the loop)\n' "$STOP_FILE"
+  printf 'cwd=%s (resolved via CODEX_FLEET_WORKER_CWD precedence; fallback $REPO=%s)\n' \
+    "$worker_cwd" "$REPO"
   printf 'add-dir: %s\n' "${ADD_DIR_FLAGS[*]}"
   printf '========================================\n\n'
 } | tee -a "$LOG_FILE"
