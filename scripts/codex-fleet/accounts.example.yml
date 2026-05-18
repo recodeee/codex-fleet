@@ -25,6 +25,16 @@
 #   specialty       [list of plan-slug prefixes] (default [] = generalist)
 #                   Pane prefers tasks whose `plan_slug` starts with one of
 #                   these prefixes. Empty list = accept all plans.
+#
+#                   Auto-detect (SI-11): when this list is empty AND the
+#                   priority plan's metadata.writable_roots points outside
+#                   the codex-fleet repo family (i.e. not under
+#                   /home/deadpool/Documents/codex-fleetui or
+#                   /home/deadpool/Documents/recodee), full-bringup.sh
+#                   auto-sets CODEX_FLEET_SPECIALTY to the priority plan
+#                   slug to keep workers off stale fleet plans whose
+#                   writable_roots would fail the worker's --add-dir
+#                   preflight. A non-empty `specialty:` here always wins.
 #   worker_cwd      (optional, SI-9) absolute path to cd into before the
 #                   worker REPL starts. Exported as CODEX_FLEET_WORKER_CWD.
 #                   Use when this account is dedicated to a project tree

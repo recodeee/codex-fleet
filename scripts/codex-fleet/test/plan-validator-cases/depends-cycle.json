@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "plan_slug": "depends-cycle-2026-05-18",
+  "title": "depends_on cycle fixture",
+  "problem": "Three subtasks form a depends_on cycle (0 -> 1 -> 2 -> 0). The validator must detect via Kahn's topological sort that the cycle exists and exit fatal. Used by run-plan-validator-cases.sh to assert exit 3.",
+  "acceptance_criteria": [
+    "Every sub-task lands as an independent PR with verifiable evidence in the PR body and CI gate passes."
+  ],
+  "metadata": {
+    "writable_roots": ["/tmp"]
+  },
+  "tasks": [
+    {
+      "subtask_index": 0,
+      "title": "alpha",
+      "description": "Alpha sub-task description padded to satisfy the >=200 char rule. This sub-task depends on beta, which depends on gamma, which depends back on alpha. The validator must detect this depends_on cycle via Kahn's topological sort.",
+      "file_scope": ["scripts/alpha.sh"],
+      "depends_on": [1]
+    },
+    {
+      "subtask_index": 1,
+      "title": "beta",
+      "description": "Beta sub-task description padded to satisfy the >=200 char rule. Depends on gamma, which depends on alpha. Together with alpha and gamma this forms a three-node depends_on cycle that must trigger a fatal exit from the validator.",
+      "file_scope": ["scripts/beta.sh"],
+      "depends_on": [2]
+    },
+    {
+      "subtask_index": 2,
+      "title": "gamma",
+      "description": "Gamma sub-task description padded to satisfy the >=200 char rule. Depends on alpha, completing the three-node depends_on cycle (0 -> 1 -> 2 -> 0). The validator must report a depends_on cycle detected error.",
+      "file_scope": ["scripts/gamma.sh"],
+      "depends_on": [0]
+    }
+  ]
+}

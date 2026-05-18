@@ -4,14 +4,20 @@
 # plan-validator.sh — validate a codex-fleet plan.json against the flat-parallelism contract.
 #
 # Usage:
-#   plan-validator.sh <path-to-plan.json> [--allow-waves]
+#   plan-validator.sh <path-to-plan.json> [--allow-waves] [--strict]
 #
 # Rules enforced:
 #   (a) every sub-task's `depends_on` is empty UNLESS --allow-waves is passed.
+#       With --allow-waves, `depends_on` is allowed but must form a DAG (no
+#       cycles).
 #   (b) no two sub-tasks share any file path in `file_scope`. A directory
 #       entry (one that ends with '/') overlaps with any sibling entry that
 #       falls under that directory prefix.
 #   (c) `acceptance_criteria` is a non-empty array of strings each ≥ 40 chars.
+#   (d) every `metadata.writable_roots` path exists and is writable.
+#   (e) every `file_scope` path is under at least one writable_root. Warning
+#       by default; promoted to a fatal error with --strict.
+#   (f) every sub-task `description` is ≥ 200 chars.
 #
 # Output contract:
 #   - Human-readable findings go to STDERR (one finding per line, prefixed
@@ -90,11 +96,16 @@ fi
 
 PLAN_PATH=""
 ALLOW_WAVES=0
+STRICT=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --allow-waves)
             ALLOW_WAVES=1
+            shift
+            ;;
+        --strict)
+            STRICT=1
             shift
             ;;
         -h|--help)
@@ -323,6 +334,183 @@ EOF
             done
             i=$((i + 1))
         done
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Rule (a-extra): depends_on must form a DAG (no cycles) when --allow-waves.
+# We always run this check — a cycle is an error regardless of waves mode.
+# ---------------------------------------------------------------------------
+
+if [ "$tasks_type" = "array" ]; then
+    cycle_msg=$(PLAN_FILE="$PLAN_PATH" python3 - <<'PY'
+import json, os, sys
+
+try:
+    with open(os.environ["PLAN_FILE"]) as f:
+        data = json.load(f)
+except Exception:
+    sys.exit(0)
+
+tasks = data.get("tasks") or []
+if not isinstance(tasks, list) or not tasks:
+    sys.exit(0)
+
+# Build adjacency map keyed on subtask_index (preferred) or array position.
+graph = {}
+title_by = {}
+for pos, t in enumerate(tasks):
+    if not isinstance(t, dict):
+        continue
+    idx = t.get("subtask_index")
+    if not isinstance(idx, int):
+        idx = pos
+    deps = t.get("depends_on") or []
+    if not isinstance(deps, list):
+        deps = []
+    clean = []
+    for d in deps:
+        if isinstance(d, int):
+            clean.append(d)
+    graph[idx] = clean
+    title_by[idx] = t.get("title", "")
+
+# Kahn's algorithm: count incoming edges per node; repeatedly remove nodes
+# with zero in-degree. If any nodes remain afterwards, those form a cycle.
+indeg = {n: 0 for n in graph}
+for n, deps in graph.items():
+    for d in deps:
+        if d in indeg:
+            indeg[d] = indeg.get(d, 0)
+            # An edge n -> d means n depends on d; d must come first.
+            # In-degree of n increments for each dependency.
+    # Recompute n's in-degree as len of its (in-graph) deps.
+    indeg[n] = sum(1 for d in deps if d in graph)
+
+# Topological sort.
+ready = [n for n, c in indeg.items() if c == 0]
+removed = set()
+while ready:
+    n = ready.pop()
+    removed.add(n)
+    for m, deps in graph.items():
+        if m in removed:
+            continue
+        if n in deps:
+            indeg[m] -= 1
+            if indeg[m] == 0:
+                ready.append(m)
+
+remaining = [n for n in graph if n not in removed]
+if remaining:
+    parts = ["{}({})".format(n, title_by.get(n, "")) for n in remaining]
+    print("depends_on cycle detected; involved subtasks: " + ", ".join(parts))
+PY
+)
+    if [ -n "$cycle_msg" ]; then
+        add_error "$cycle_msg"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Rule (d): every metadata.writable_roots path must exist and be writable.
+# ---------------------------------------------------------------------------
+
+writable_roots=$(jq -r '(.metadata.writable_roots // []) | .[]?' "$PLAN_PATH" 2>/dev/null || true)
+if [ -n "$writable_roots" ]; then
+    while IFS= read -r root; do
+        [ -z "$root" ] && continue
+        if [ ! -d "$root" ]; then
+            add_error "writable_root path does not exist or is not a directory: $root"
+            continue
+        fi
+        if [ ! -w "$root" ]; then
+            add_error "writable_root path is not writable by current user: $root"
+        fi
+    done <<EOF
+$writable_roots
+EOF
+fi
+
+# ---------------------------------------------------------------------------
+# Rule (e): every file_scope path must be under at least one writable_root.
+# Warning by default, fatal under --strict.
+# ---------------------------------------------------------------------------
+
+if [ "$tasks_type" = "array" ] && [ -n "$writable_roots" ]; then
+    # Normalize roots: strip trailing slash for comparison.
+    roots_for_check=$(printf '%s\n' "$writable_roots" | sed 's:/*$::')
+    # Stream "<idx>\t<path>" pairs.
+    scope_pairs2=$(jq -r '
+        .tasks
+        | to_entries
+        | map(
+            . as $t
+            | (($t.value.file_scope // []) | map({idx: $t.key, path: .}))
+          )
+        | add // []
+        | .[]
+        | "\(.idx)\t\(.path)"
+    ' "$PLAN_PATH")
+    if [ -n "$scope_pairs2" ]; then
+        while IFS=$'\t' read -r s_idx s_path; do
+            [ -z "$s_idx" ] && continue
+            # Repo-relative file_scope entries (the norm) are considered
+            # covered because they resolve against whichever writable_root
+            # the worker cd's to. We only police absolute paths — those
+            # must literally fall under one of the declared roots.
+            case "$s_path" in
+                /*) : ;;
+                *)
+                    continue
+                    ;;
+            esac
+            covered=0
+            while IFS= read -r root; do
+                [ -z "$root" ] && continue
+                case "$s_path" in
+                    "$root"|"$root"/*)
+                        covered=1
+                        break
+                        ;;
+                esac
+            done <<EOF
+$roots_for_check
+EOF
+            if [ "$covered" -eq 0 ]; then
+                if [ "$STRICT" -eq 1 ]; then
+                    add_error "file_scope path not under any writable_root: tasks[$s_idx]='$s_path'"
+                else
+                    add_warning "file_scope path not under any writable_root: tasks[$s_idx]='$s_path'"
+                fi
+            fi
+        done <<EOF
+$scope_pairs2
+EOF
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Rule (f): every subtask description must be ≥ 200 chars.
+# ---------------------------------------------------------------------------
+
+if [ "$tasks_type" = "array" ]; then
+    short_descs=$(jq -r '
+        .tasks
+        | to_entries
+        | map(
+            select(((.value.description // "") | length) < 200)
+            | "\(.key)\t\(.value.title // "")\t\((.value.description // "") | length)"
+          )
+        | .[]
+    ' "$PLAN_PATH")
+    if [ -n "$short_descs" ]; then
+        while IFS=$'\t' read -r d_idx d_title d_len; do
+            [ -z "$d_idx" ] && continue
+            add_error "tasks[$d_idx] '$d_title' description too short (length=$d_len, need ≥ 200)"
+        done <<EOF
+$short_descs
+EOF
     fi
 fi
 

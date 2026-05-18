@@ -179,6 +179,54 @@ PY
 )
 [ -n "$ADD_DIR_FLAGS" ] || die "failed to compute ADD_DIR_FLAGS for plan $PLAN_SLUG"
 
+# 2c. Validate the priority plan.json before we attempt to publish it.
+# Catches duplicate file_scope, depends_on cycles, missing writable_roots,
+# short descriptions. Exit codes: 0 ok, 2 warnings (continue), 3 fatal (abort).
+log "validating priority plan: $PLAN_SLUG"
+PLAN_VALIDATOR="$SCRIPT_DIR/lib/plan-validator.sh"
+if [ -x "$PLAN_VALIDATOR" ] || [ -r "$PLAN_VALIDATOR" ]; then
+  validator_stderr=$(mktemp)
+  set +e
+  bash "$PLAN_VALIDATOR" "openspec/plans/$PLAN_SLUG/plan.json" --allow-waves >/dev/null 2>"$validator_stderr"
+  validator_rc=$?
+  set -e
+  case "$validator_rc" in
+    0)
+      log "plan-validator: ok"
+      ;;
+    2)
+      warn "plan-validator: warnings (continuing):"
+      sed 's/^/  /' "$validator_stderr" >&2 || true
+      ;;
+    3)
+      warn "plan-validator: FATAL findings for $PLAN_SLUG:"
+      sed 's/^/  /' "$validator_stderr" >&2 || true
+      rm -f "$validator_stderr"
+      die "priority plan failed validation; aborting bringup."
+      ;;
+    *)
+      warn "plan-validator: unexpected exit=$validator_rc; continuing"
+      sed 's/^/  /' "$validator_stderr" >&2 || true
+      ;;
+  esac
+  rm -f "$validator_stderr"
+else
+  warn "plan-validator missing at $PLAN_VALIDATOR — skipping pre-publish validation"
+fi
+
+# 2d. Compute CODEX_FLEET_SPECIALTY default for this bringup. When the
+# priority plan's writable_roots is "foreign" (outside the codex-fleet repo
+# family), pin the matchmaker to this plan only — otherwise empty so
+# workers stay generalist across all fleet-family plans.
+# shellcheck source=lib/plan-routing-filter.sh
+. "$SCRIPT_DIR/lib/plan-routing-filter.sh"
+FLEET_DEFAULT_SPECIALTY="$(compute_specialty "$PLAN_SLUG" "openspec/plans/$PLAN_SLUG/plan.json" || true)"
+if [ -n "$FLEET_DEFAULT_SPECIALTY" ]; then
+  log "auto-routing: CODEX_FLEET_SPECIALTY default = '$FLEET_DEFAULT_SPECIALTY' (foreign writable_roots detected)"
+else
+  log "auto-routing: CODEX_FLEET_SPECIALTY default = '' (generalist; fleet-family writable_roots)"
+fi
+
 # Preflight every writable root: must exist + be writable by the current user.
 add_count=0
 for path in $(printf '%s\n' "$ADD_DIR_FLAGS" | awk '{for(i=1;i<=NF;i++) if($i=="--add-dir"){print $(i+1)}}'); do
@@ -230,6 +278,63 @@ for s in slugs:
 PY
 )
 mkdir -p /tmp/codex-fleet
+
+# publish_plan_once <slug> — invoke `colony plan publish` once. If stderr
+# matches the documented "auto_archive" undefined error, retry once with
+# --auto-archive. On retry-failure, log a HARD error but do not exit.
+# Returns 0 on (initial or retry) success, non-zero on hard failure. Touches
+# the per-slug cache mark only on success.
+publish_plan_once() {
+  local slug="$1"
+  local mark_file="/tmp/codex-fleet/.plan-publish.$slug.mark"
+  local session
+  session="full-bringup-$(date +%s)"
+  local err_file
+  err_file=$(mktemp)
+  local rc=0
+
+  set +e
+  colony plan publish "$slug" --agent claude --session "$session" 1> >(sed 's/^/  /') 2>"$err_file"
+  rc=$?
+  set -e
+
+  if [ "$rc" -eq 0 ]; then
+    sed 's/^/  /' "$err_file" >&2 || true
+    rm -f "$err_file"
+    touch "$mark_file"
+    return 0
+  fi
+
+  # Surface the original stderr to the operator.
+  sed 's/^/  /' "$err_file" >&2 || true
+
+  # Detect the documented "Cannot read properties of undefined (reading
+  # auto_archive)" failure mode and retry with --auto-archive once.
+  if grep -q "auto_archive" "$err_file" 2>/dev/null; then
+    warn "publish $slug failed with auto_archive-undefined; retrying with --auto-archive"
+    local err_file2
+    err_file2=$(mktemp)
+    set +e
+    colony plan publish "$slug" --agent claude --session "$session" --auto-archive 1> >(sed 's/^/  /') 2>"$err_file2"
+    local rc2=$?
+    set -e
+    if [ "$rc2" -eq 0 ]; then
+      sed 's/^/  /' "$err_file2" >&2 || true
+      rm -f "$err_file" "$err_file2"
+      touch "$mark_file"
+      return 0
+    fi
+    sed 's/^/  /' "$err_file2" >&2 || true
+    printf '\033[31m[full-bringup] FATAL:\033[0m publish retry with --auto-archive also failed for %s (rc=%s). Workers may still pick up via filesystem; continuing bringup.\n' "$slug" "$rc2" >&2
+    rm -f "$err_file" "$err_file2"
+    return 1
+  fi
+
+  rm -f "$err_file"
+  printf '\033[31m[full-bringup] FATAL:\033[0m publish failed for %s (rc=%s) and stderr did not match the known auto_archive signature; not retrying. Continuing.\n' "$slug" "$rc" >&2
+  return 1
+}
+
 plan_publish_total=0
 plan_publish_ok=0
 plan_publish_cached=0
@@ -246,11 +351,11 @@ while IFS= read -r slug; do
     fi
   fi
   log "publishing plan: $slug"
-  if colony plan publish "$slug" --agent claude --session "full-bringup-$(date +%s)" 2>&1 | sed 's/^/  /'; then
-    touch "$mark_file"
+  if publish_plan_once "$slug"; then
     plan_publish_ok=$((plan_publish_ok + 1))
   else
-    warn "publish returned non-zero for $slug; continuing. Workers may not see this plan in task_ready_for_agent."
+    warn "publish hard-failed for $slug; continuing. Workers may not see this plan in task_ready_for_agent."
+    warn "  troubleshooting: if publish fails with auto_archive undefined, the bringup will retry with --auto-archive automatically."
   fi
 done <<< "$ALL_PLAN_SLUGS"
 log "published $((plan_publish_ok + plan_publish_cached))/$plan_publish_total plans (priority=$PLAN_SLUG, ok=$plan_publish_ok, cached=$plan_publish_cached)"
@@ -396,6 +501,21 @@ log "final account list: $COUNT (tier+specialty from $ACCOUNTS_YAML)"
 
 # 7. Stage CODEX_HOMEs
 log "staging per-account CODEX_HOMEs"
+# Apply the auto-routing default (from §2d / plan-routing-filter.sh): when
+# a per-account specialty in accounts.yml is empty AND the priority plan's
+# writable_roots is foreign (outside the codex-fleet repo family), pin the
+# matchmaker to the priority plan slug. This stops Colony from routing
+# workers onto stale fleet plans whose writable_roots fail the worker's
+# --add-dir preflight (2026-05-18 observation). A non-empty specialty in
+# accounts.yml is always respected.
+apply_default_specialty() {
+  local current="$1"
+  if [ -n "$current" ]; then
+    printf '%s' "$current"
+    return 0
+  fi
+  printf '%s' "${FLEET_DEFAULT_SPECIALTY:-}"
+}
 # Map tier (from accounts.yml) → codex `model_reasoning_effort`. Consumed by
 # fleet_render_config's __REASONING_EFFORT__ substitution.
 tier_to_effort() {
@@ -531,6 +651,10 @@ while IFS='|' read -r id email tier specialty; do
   [ -z "$id" ] && continue
   pid="${PANE_IDS[$i]}"
   tmux set-option -p -t "$pid" '@panel' "[codex-$id]"
+  # Per-account specialty wins; otherwise fall back to the bringup's
+  # FLEET_DEFAULT_SPECIALTY (set by plan-routing-filter.sh when the priority
+  # plan's writable_roots are outside the codex-fleet repo family).
+  effective_specialty="$(apply_default_specialty "$specialty")"
   # --add-dir is required when the active plan touches paths outside the
   # codex-fleet repo (e.g. /home/deadpool/Documents/recodee for gx-fleet-*
   # plans). Without it, `workspace-write` blocks all writes and the worker
@@ -549,11 +673,11 @@ while IFS='|' read -r id email tier specialty; do
   case "${CODEX_FLEET_RUNTIME:-codex}" in
     claude)
       tmux respawn-pane -k -t "$pid" \
-        "env CLAUDE_FLEET_AGENT_NAME=claude-fleet-$id CLAUDE_FLEET_ACCOUNT_LABEL=$email CLAUDE_FLEET_TIER=${tier:-high} CLAUDE_FLEET_SPECIALTY=\"$specialty\" bash $REPO/scripts/codex-fleet/claude-worker.sh"
+        "env CLAUDE_FLEET_AGENT_NAME=claude-fleet-$id CLAUDE_FLEET_ACCOUNT_LABEL=$email CLAUDE_FLEET_TIER=${tier:-high} CLAUDE_FLEET_SPECIALTY=\"$effective_specialty\" bash $REPO/scripts/codex-fleet/claude-worker.sh"
       ;;
     *)
       tmux respawn-pane -k -t "$pid" \
-        "env CODEX_GUARD_BYPASS=1 CODEX_HOME=/tmp/codex-fleet/$id CODEX_FLEET_AGENT_NAME=codex-$id CODEX_FLEET_ACCOUNT_EMAIL=$email CODEX_FLEET_TIER=${tier:-high} CODEX_FLEET_SPECIALTY=\"$specialty\" codex --dangerously-bypass-approvals-and-sandbox $ADD_DIR_FLAGS \"\$(cat $WAKE)\""
+        "env CODEX_GUARD_BYPASS=1 CODEX_HOME=/tmp/codex-fleet/$id CODEX_FLEET_AGENT_NAME=codex-$id CODEX_FLEET_ACCOUNT_EMAIL=$email CODEX_FLEET_TIER=${tier:-high} CODEX_FLEET_SPECIALTY=\"$effective_specialty\" codex --dangerously-bypass-approvals-and-sandbox $ADD_DIR_FLAGS \"\$(cat $WAKE)\""
       ;;
   esac
   i=$((i + 1))

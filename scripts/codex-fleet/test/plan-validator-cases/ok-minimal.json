@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "plan_slug": "ok-minimal-2026-05-18",
+  "title": "ok minimal fixture",
+  "problem": "Minimal well-formed plan used by run-plan-validator-cases.sh to assert exit 0. Description fields are padded with realistic copy so the >=200 char rule is satisfied. Acceptance criteria are also padded.",
+  "acceptance_criteria": [
+    "Every sub-task lands as an independent PR with verifiable evidence in the PR body and CI gate passes."
+  ],
+  "metadata": {
+    "writable_roots": ["/tmp"]
+  },
+  "tasks": [
+    {
+      "subtask_index": 0,
+      "title": "alpha",
+      "description": "Alpha sub-task description padded to satisfy the new >=200 char rule. The contents are intentionally verbose so the validator does not flag this fixture as short. Tests the OK exit code path of the plan validator end-to-end.",
+      "file_scope": ["scripts/alpha.sh"],
+      "depends_on": []
+    },
+    {
+      "subtask_index": 1,
+      "title": "beta",
+      "description": "Beta sub-task description padded to satisfy the >=200 char rule. The fixture is used by the validator test runner and must not produce any warning or error so the expected exit code can remain a clean zero across reruns.",
+      "file_scope": ["scripts/beta.sh"],
+      "depends_on": []
+    }
+  ]
+}

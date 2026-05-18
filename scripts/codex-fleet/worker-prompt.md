@@ -94,6 +94,15 @@ Let `d = task.metadata.difficulty` (default `standard`).
 - If `spec` non-empty AND no prefix in `spec` is a prefix of `task.plan_slug`: `task_post(kind:'note', content:'specialty-skip: plan=<plan_slug> spec=<spec>')`, `task_hand_off(to_agent:'any')`, `sleep 60`, `goto 2`.
 - Empty `spec` = generalist; do not skip.
 
+**Auto-set specialty (SI-11).** `full-bringup.sh` sources
+`lib/plan-routing-filter.sh` and auto-sets `CODEX_FLEET_SPECIALTY` to the
+priority plan slug when that plan's `metadata.writable_roots` does NOT
+include `/home/deadpool/Documents/codex-fleetui` or
+`/home/deadpool/Documents/recodee` (i.e. the plan targets a "foreign"
+repo). This prevents the matchmaker from routing your pane onto an older
+fleet-family plan that would fail the writable-root preflight. Per-account
+`specialty:` in `accounts.yml` always wins over the auto-default.
+
 ### Preflight (REQUIRED before any edit)
 
 Reject the claim early if the work is unreachable. This stops endless
