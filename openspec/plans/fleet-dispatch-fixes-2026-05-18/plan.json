@@ -35,7 +35,7 @@
       "depends_on": [],
       "spec_row_id": null,
       "capability_hint": "doc_work",
-      "status": "available"
+      "status": "completed"
     },
     {
       "subtask_index": 1,
@@ -48,7 +48,7 @@
       "depends_on": [],
       "spec_row_id": null,
       "capability_hint": "test_work",
-      "status": "available"
+      "status": "completed"
     },
     {
       "subtask_index": 2,
@@ -60,7 +60,7 @@
       "depends_on": [],
       "spec_row_id": null,
       "capability_hint": "api_work",
-      "status": "available"
+      "status": "completed"
     },
     {
       "subtask_index": 3,
@@ -72,7 +72,7 @@
       "depends_on": [],
       "spec_row_id": null,
       "capability_hint": "frontend_work",
-      "status": "available"
+      "status": "completed"
     },
     {
       "subtask_index": 4,
@@ -84,7 +84,7 @@
       "depends_on": [],
       "spec_row_id": null,
       "capability_hint": "frontend_work",
-      "status": "available"
+      "status": "completed"
     },
     {
       "subtask_index": 5,
@@ -96,7 +96,7 @@
       "depends_on": [],
       "spec_row_id": null,
       "capability_hint": "test_work",
-      "status": "available"
+      "status": "completed"
     },
     {
       "subtask_index": 6,
@@ -108,7 +108,7 @@
       "depends_on": [],
       "spec_row_id": null,
       "capability_hint": "test_work",
-      "status": "available"
+      "status": "completed"
     }
   ]
 }

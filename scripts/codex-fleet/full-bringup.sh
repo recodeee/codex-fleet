@@ -1007,6 +1007,44 @@ case "$chrome_status" in
     ;;
 esac
 
+# ────────────────────────────────────────────────────────────────────────────
+# F7 — Codex first-launch prompt auto-bypass.
+# Per-account CODEX_HOMEs trigger 3 interactive prompts on first launch
+# (Do you trust …, External agent config detected, Press enter to continue).
+# Drain them before workers can start any work.
+# Gated on CODEX_FLEET_AUTO_BYPASS (default 1; set =0 to skip).
+# ────────────────────────────────────────────────────────────────────────────
+if [ "${CODEX_FLEET_AUTO_BYPASS:-1}" = "1" ]; then
+  bypass="$SCRIPT_DIR/codex-first-launch-supervisor.sh"
+  if [ -x "$bypass" ] || [ -f "$bypass" ]; then
+    log "auto-bypass: draining Codex first-launch prompts on $SESSION (panes=$N_PANES)"
+    bash "$bypass" "$SESSION" "$N_PANES" || warn "auto-bypass exited non-zero; continuing"
+  else
+    warn "auto-bypass: $bypass not found; skipping"
+  fi
+else
+  log "auto-bypass: skipped (CODEX_FLEET_AUTO_BYPASS=$CODEX_FLEET_AUTO_BYPASS)"
+fi
+
+# ────────────────────────────────────────────────────────────────────────────
+# F3 — Auto-wake workers once at end of bringup.
+# Without this, workers spawn but never get pointed at Colony tasks because
+# the wake-prompt window's polling loop is event-driven, not timer-driven.
+# Gated on CODEX_FLEET_AUTO_WAKE (default 1; set =0 to skip).
+# ────────────────────────────────────────────────────────────────────────────
+if [ "${CODEX_FLEET_AUTO_WAKE:-1}" = "1" ]; then
+  wake="$SCRIPT_DIR/wake-prompt.sh"
+  if [ -x "$wake" ] || [ -f "$wake" ]; then
+    log "auto-wake: firing wake-prompt once on $SESSION"
+    # wake-prompt.sh tolerates being invoked outside its ticker context.
+    bash "$wake" "$SESSION" "$N_PANES" || warn "auto-wake exited non-zero; continuing"
+  else
+    warn "auto-wake: $wake not found; skipping (wake-prompt.sh window will tick on its own)"
+  fi
+else
+  log "auto-wake: skipped (CODEX_FLEET_AUTO_WAKE=$CODEX_FLEET_AUTO_WAKE)"
+fi
+
 log "DONE."
 log "  main session:    tmux attach -t $SESSION"
 log "  ticker session:  tmux attach -t $TICKER_SESSION"

@@ -20,11 +20,27 @@ set -eo pipefail
 NEED="${1:-1}"; shift
 
 CACHE_DIR="${CACHE_DIR:-/tmp/claude-viz/cap-probe-cache}"
-CACHE_TTL_HEALTHY="${CACHE_TTL_HEALTHY:-300}"
+# F2 — Cap-cache TTL hardening. Live FLEET_ID=3 observation: first bringup
+# found 5/6 healthy; a fresh `--no-cap-cache` probe ~5min later found 8/8.
+# The 300s healthy TTL outlived actual quota recovery, leaving the pool
+# falsely thin. Drop default healthy TTL to 60s. Operators can pin a
+# different TTL via CODEX_FLEET_CAP_CACHE_TTL without touching the script.
+# Also: if the bringup-failure marker exists, treat cache as cold and
+# re-probe regardless of age — a prior failed bringup is exactly the
+# moment when stale cache is most dangerous.
+CACHE_TTL_HEALTHY="${CACHE_TTL_HEALTHY:-${CODEX_FLEET_CAP_CACHE_TTL:-60}}"
 # Re-probe "unknown" verdicts after 60s instead of 120s; an unknown is
 # usually a one-off timeout, not a stable state, and we don't want the
 # pool to look empty for 2 minutes after a single transient probe miss.
 CACHE_TTL_UNKNOWN="${CACHE_TTL_UNKNOWN:-60}"
+BRINGUP_FAILURE_MARKER="${BRINGUP_FAILURE_MARKER:-/tmp/claude-viz/bringup-failure.marker}"
+if [ -f "$BRINGUP_FAILURE_MARKER" ]; then
+  # Force a cold probe on the next run by zeroing the healthy TTL.
+  # cache_check still serves capped accounts (because until_epoch >> now)
+  # but treats healthy/unknown as stale.
+  CACHE_TTL_HEALTHY=0
+  CACHE_TTL_UNKNOWN=0
+fi
 # A healthy `codex exec ping` round-trip takes 30-60s under MCP-server
 # boot + first model token. The previous 15s default timed out every
 # probe as "unknown" during the May 14 stall, leaving the cap-swap
