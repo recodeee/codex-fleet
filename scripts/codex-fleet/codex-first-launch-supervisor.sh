@@ -29,7 +29,7 @@ SESSION="${1:-codex-fleet}"
 PANES="${2:-8}"
 SOCKET="${TMUX_SOCKET:-codex-fleet}"
 ROUNDS="${CODEX_FLEET_BYPASS_ROUNDS:-10}"
-INTERVAL="${CODEX_FLEET_BYPASS_INTERVAL:-1.5}"
+INTERVAL="${CODEX_FLEET_BYPASS_INTERVAL:-2.5}"
 
 tmx() { tmux -L "$SOCKET" "$@"; }
 log() { printf '[first-launch-supervisor] %s\n' "$*" >&2; }
