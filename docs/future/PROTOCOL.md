@@ -157,7 +157,7 @@ Define how this docs/future protocol itself is reviewed, accepted, and converted
 
 #### 1.4.1 Formal lifecycle states for every improvement entry
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: docs lane; no Rust changes
 
 **Problem.** Improvements live or die without a tracked state, so readers cannot triage them.
@@ -1060,7 +1060,7 @@ Make `stall-watcher.sh` reliable, debuggable, and self-documenting. It triggers 
 
 #### 7.4.1 Add `--help` and `--version` to stall-watcher.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -1352,7 +1352,7 @@ Make `plan-watcher.sh` reliable, debuggable, and self-documenting. It surfaces p
 
 #### 9.4.1 Add `--help` and `--version` to plan-watcher.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -1498,7 +1498,7 @@ Make `review-queue.sh` reliable, debuggable, and self-documenting. It feeds the 
 
 #### 10.4.1 Add `--help` and `--version` to review-queue.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -1644,7 +1644,7 @@ Make `review-pane-scanner.sh` reliable, debuggable, and self-documenting. It aut
 
 #### 11.4.1 Add `--help` and `--version` to review-pane-scanner.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -1790,7 +1790,7 @@ Make `auto-reviewer.sh` reliable, debuggable, and self-documenting. It automates
 
 #### 12.4.1 Add `--help` and `--version` to auto-reviewer.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -2520,7 +2520,7 @@ Make `show-fleet.sh` reliable, debuggable, and self-documenting. It prints fleet
 
 #### 17.4.1 Add `--help` and `--version` to show-fleet.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -2666,7 +2666,7 @@ Make `token-meter.sh` reliable, debuggable, and self-documenting. It surfaces pe
 
 #### 18.4.1 Add `--help` and `--version` to token-meter.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -2812,7 +2812,7 @@ Make `warm-pool.sh` reliable, debuggable, and self-documenting. It keeps a warm 
 
 #### 19.4.1 Add `--help` and `--version` to warm-pool.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -2958,7 +2958,7 @@ Make `spawn-fleet.sh` reliable, debuggable, and self-documenting. It is the lowe
 
 #### 20.4.1 Add `--help` and `--version` to spawn-fleet.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -3104,7 +3104,7 @@ Make `dispatch-plan.sh` reliable, debuggable, and self-documenting. It publishes
 
 #### 21.4.1 Add `--help` and `--version` to dispatch-plan.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -3396,7 +3396,7 @@ Make `proactive-probe.sh` reliable, debuggable, and self-documenting. It periodi
 
 #### 23.4.1 Add `--help` and `--version` to proactive-probe.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -3542,7 +3542,7 @@ Make `claim-trigger.sh` reliable, debuggable, and self-documenting. It triggers 
 
 #### 24.4.1 Add `--help` and `--version` to claim-trigger.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -3980,7 +3980,7 @@ Make `claude-supervisor.sh` reliable, debuggable, and self-documenting. It super
 
 #### 27.4.1 Add `--help` and `--version` to claude-supervisor.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -4856,7 +4856,7 @@ Make `plan-tree-pin.sh` reliable, debuggable, and self-documenting. It pins a pl
 
 #### 33.4.1 Add `--help` and `--version` to plan-tree-pin.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -5294,7 +5294,7 @@ Make `supervisor.sh` reliable, debuggable, and self-documenting. It is the legac
 
 #### 36.4.1 Add `--help` and `--version` to supervisor.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -5440,7 +5440,7 @@ Make `patch-codex-prompts.sh` reliable, debuggable, and self-documenting. It pat
 
 #### 37.4.1 Add `--help` and `--version` to patch-codex-prompts.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -5732,7 +5732,7 @@ Make `down.sh` reliable, debuggable, and self-documenting. It tears down the fle
 
 #### 39.4.1 Add `--help` and `--version` to down.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -6024,7 +6024,7 @@ Make `add-workers.sh` reliable, debuggable, and self-documenting. It adds worker
 
 #### 41.4.1 Add `--help` and `--version` to add-workers.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
@@ -6170,7 +6170,7 @@ Make `codex-fleet-2.sh` reliable, debuggable, and self-documenting. It is an alt
 
 #### 42.4.1 Add `--help` and `--version` to codex-fleet-2.sh
 
-- state: PROPOSED
+- state: SHIPPED
 - lane: scripts lane
 
 **Problem.** Discoverability is poor; flags are guessed from source.
