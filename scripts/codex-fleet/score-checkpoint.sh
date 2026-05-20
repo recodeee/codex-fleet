@@ -27,6 +27,26 @@
 
 set -euo pipefail
 
+# --help / --version plumbing (see lib/version.sh).
+FLEET_USAGE="score-checkpoint.sh — score uncommitted diffs in active Guardex
+agent worktrees against their plan's acceptance criteria.
+
+Usage:
+  ./scripts/codex-fleet/score-checkpoint.sh                 # scan all active worktrees
+  ./scripts/codex-fleet/score-checkpoint.sh <worktree>      # score a single worktree
+  ./scripts/codex-fleet/score-checkpoint.sh --help | --version
+
+Env:
+  ANTHROPIC_API_KEY               required (consumed by lib/score-diff.py)
+  CODEX_FLEET_CHECKPOINT_PATH     sink path (default /tmp/claude-viz/fleet-checkpoint-warnings.json)
+  CODEX_FLEET_REPO_ROOT           repo root (default: git toplevel)
+
+Flags:
+  -h, --help                      print this help and exit 0
+  --version                       print '<basename> <FLEET_VERSION>' and exit 0"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/version.sh"
+handle_help_version_flags "$@"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCORER="$SCRIPT_DIR/lib/score-diff.py"
 REPO_ROOT="${CODEX_FLEET_REPO_ROOT:-$(git rev-parse --show-toplevel)}"

@@ -17,6 +17,32 @@
 # Usage: bash cap-probe.sh <need_n> email1 email2 ...
 set -eo pipefail
 
+# --help / --version plumbing (see lib/version.sh).
+FLEET_USAGE="cap-probe.sh — verify candidate codex accounts are usable.
+
+Usage:
+  bash cap-probe.sh <need_n> email1 email2 ...
+  bash cap-probe.sh --help | --version
+
+Args:
+  need_n               minimum number of healthy accounts required (exit 3 otherwise)
+  email1 email2 ...    candidate accounts to probe (cached per email)
+
+Env:
+  CACHE_DIR                       cache root (default /tmp/claude-viz/cap-probe-cache)
+  CACHE_TTL_HEALTHY               healthy verdict TTL seconds (default 60)
+  CODEX_FLEET_CAP_CACHE_TTL       alias for healthy TTL (operator pin)
+  CACHE_TTL_UNKNOWN               unknown verdict TTL seconds (default 60)
+  BRINGUP_FAILURE_MARKER          presence forces cold re-probe
+  PROBE_TIMEOUT                   per-account codex exec timeout (default 60s)
+  LOG                             log path (default /tmp/claude-viz/cap-probe.log)
+
+Flags:
+  -h, --help                      print this help and exit 0
+  --version                       print '<basename> <FLEET_VERSION>' and exit 0"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/version.sh"
+handle_help_version_flags "$@"
+
 NEED="${1:-1}"; shift
 
 CACHE_DIR="${CACHE_DIR:-/tmp/claude-viz/cap-probe-cache}"

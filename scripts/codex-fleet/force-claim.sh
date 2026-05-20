@@ -52,6 +52,44 @@
 #   CODEX_FLEET_CLAIM_MODE=both|event|poll                   # default: both
 set -eo pipefail
 
+# --help / --version plumbing (see lib/version.sh). Handled before sourcing
+# _tmux.sh / claim-fence.sh so docs work even when those libs misbehave.
+FLEET_USAGE="force-claim.sh — dispatch ready plan sub-tasks across all
+non-empty openspec plans onto idle codex panes.
+
+Usage:
+  bash scripts/codex-fleet/force-claim.sh                 # one-shot
+  bash scripts/codex-fleet/force-claim.sh --dry-run       # show plan, no dispatch
+  bash scripts/codex-fleet/force-claim.sh --loop          # event + poll every 15s
+  bash scripts/codex-fleet/force-claim.sh --loop --quit-when-empty
+  bash scripts/codex-fleet/force-claim.sh --loop --empty-threshold=5
+  bash scripts/codex-fleet/force-claim.sh --no-token-check
+  bash scripts/codex-fleet/force-claim.sh --help | --version
+
+Env:
+  FORCE_CLAIM_REPO / CODEX_FLEET_REPO_ROOT   repo root (default: derived)
+  FORCE_CLAIM_SESSION                        tmux session (default: codex-fleet)
+  FORCE_CLAIM_WINDOW                         tmux window  (default: overview)
+  FORCE_CLAIM_PLAN_JSON                      pin to a single plan
+  FORCE_CLAIM_INTERVAL                       loop poll seconds (default: 15)
+  FORCE_CLAIM_EMPTY_THRESHOLD                consecutive empties to quit (default: 3)
+  CODEX_FLEET_CLAIM_MODE                     both | event | poll (default: both)
+  FORCE_CLAIM_TOKEN_METER                    path to token-meter.sh
+  FORCE_CLAIM_TOKEN_MIN_5H / _MIN_WK         cap thresholds for skipping panes
+  FORCE_CLAIM_SKIP_READY_CHECK=1             bypass worker-ready gate
+
+Flags:
+  --dry-run                       show plan; do not dispatch
+  --loop                          event + poll backstop
+  --interval=N                    poll interval (seconds)
+  --quit-when-empty               exit 0 after empty-streak
+  --empty-threshold=N             consecutive empty passes required
+  --no-token-check                bypass token-meter cap filter
+  -h, --help                      print this help and exit 0
+  --version                       print '<basename> <FLEET_VERSION>' and exit 0"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/version.sh"
+handle_help_version_flags "$@"
+
 # Route every `tmux ...` call through scripts/codex-fleet/lib/_tmux.sh — when
 # CODEX_FLEET_TMUX_SOCKET is set in the env (e.g. by full-bringup.sh), this
 # transparently rewrites the call to `tmux -L $SOCKET ...`. Default behavior
